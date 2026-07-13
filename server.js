@@ -26,8 +26,8 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
-import { encode as mpEncode, decode as mpDecode } from "@msgpack/msgpack";
 import { VOICES, PERSONAS, DEFAULT_PERSONA, systemPromptFor, publicCatalog } from "./personas.js";
+import { FishPipeline, TTS_SAMPLE_RATE } from "./tts.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -50,12 +50,11 @@ const LLM_BASE_URL = required("LLM_BASE_URL");
 const LLM_API_KEY = required("LLM_API_KEY");
 const LLM_MODEL = process.env.LLM_MODEL || "google/gemma-4-26B-A4B-it";
 
-const FISH_API_KEY = required("FISH_API_KEY");
+required("FISH_API_KEY"); // consumed by tts.js
 const FISH_MODEL = process.env.FISH_MODEL || "s2.1-pro";
 const FISH_LATENCY_MODE = process.env.FISH_LATENCY_MODE || "balanced"; // normal | balanced | low
 
-const MIC_SAMPLE_RATE = 16000; // browser -> Deepgram
-const TTS_SAMPLE_RATE = 24000; // Fish -> browser
+const MIC_SAMPLE_RATE = 16000; // browser -> Deepgram; TTS_SAMPLE_RATE from tts.js
 
 // Energy gate for latency measurement (NOT for turn-taking — that's Flux's
 // job). A mic chunk whose RMS clears this is treated as "the user is audibly
@@ -263,191 +262,9 @@ async function streamLLM(messages, signal, onDelta) {
 }
 
 // ---------------------------------------------------------------------------
-// Fish TTS — /v1/tts/live websocket. Text goes in as sentence chunks, PCM16
-// @ 24 kHz comes out via onAudio. One socket speaks with ONE voice; mid-turn
-// voice changes are handled by FishPipeline below, which chains sockets.
+// Fish TTS — openFishSocket + FishPipeline live in tts.js (imported above) so
+// scripts/ can exercise the voice-morph pipeline without the server.
 // ---------------------------------------------------------------------------
-
-function openFishSocket(referenceId, { onAudio, onFinish, onError }) {
-  const ws = new WebSocket("wss://api.fish.audio/v1/tts/live", {
-    headers: {
-      Authorization: `Bearer ${FISH_API_KEY}`,
-      model: FISH_MODEL,
-    },
-  });
-
-  let open = false;
-  let closed = false;
-  const queue = []; // events buffered until the socket opens
-
-  const send = (event) => {
-    if (closed) return;
-    if (!open) {
-      queue.push(event);
-      return;
-    }
-    ws.send(mpEncode(event));
-  };
-
-  ws.on("open", () => {
-    open = true;
-    ws.send(
-      mpEncode({
-        event: "start",
-        request: {
-          text: "",
-          chunk_length: 200,
-          min_chunk_length: 20,
-          format: "pcm",
-          sample_rate: TTS_SAMPLE_RATE,
-          references: [],
-          reference_id: referenceId || null,
-          normalize: true,
-          latency: FISH_LATENCY_MODE,
-          temperature: 0.7,
-          top_p: 0.7,
-        },
-      }),
-    );
-    for (const e of queue.splice(0)) ws.send(mpEncode(e));
-  });
-
-  ws.on("message", (data) => {
-    let msg;
-    try {
-      msg = mpDecode(data);
-    } catch {
-      return;
-    }
-    if (msg.event === "audio" && msg.audio?.length) {
-      onAudio(Buffer.from(msg.audio));
-    } else if (msg.event === "finish") {
-      closed = true;
-      ws.close();
-      if (msg.reason === "error") onError(new Error("Fish TTS reported an error"));
-      else onFinish();
-    }
-  });
-
-  ws.on("error", (err) => {
-    if (!closed) onError(err);
-    closed = true;
-  });
-
-  return {
-    pushText(text) {
-      if (text) send({ event: "text", text });
-    },
-    // All text sent — synthesize the trailing buffer, then end the stream.
-    endInput() {
-      send({ event: "flush" });
-      send({ event: "stop" });
-    },
-    close() {
-      closed = true;
-      try {
-        ws.close();
-      } catch {}
-    },
-  };
-}
-
-// One agent turn's TTS, possibly spanning several voices. Each setVoice()
-// seals the current Fish socket and opens the next one with the new voice;
-// later segments synthesize concurrently but their audio is buffered until
-// every earlier segment finishes, so playback order is preserved.
-class FishPipeline {
-  #segments = []; // { handle, buffered: [Buffer], gotText, finished }
-  #cb;
-  #ended = false;
-  #closed = false;
-
-  constructor(referenceId, callbacks) {
-    this.#cb = callbacks;
-    this.#openSegment(referenceId);
-  }
-
-  #openSegment(referenceId) {
-    const seg = { handle: null, buffered: [], gotText: false, finished: false };
-    const idx = this.#segments.push(seg) - 1;
-    seg.handle = openFishSocket(referenceId, {
-      onAudio: (buf) => {
-        if (this.#closed) return;
-        if (idx === this.#frontier()) this.#cb.onAudio(buf);
-        else seg.buffered.push(buf);
-      },
-      onFinish: () => this.#finishSegment(idx),
-      onError: (err) => {
-        if (this.#closed) return;
-        // A dead segment must not dam the pipeline behind it.
-        this.#finishSegment(idx);
-        this.#cb.onError?.(err);
-      },
-    });
-    return seg;
-  }
-
-  // Index of the first unfinished segment — the one allowed to play live.
-  #frontier() {
-    for (let i = 0; i < this.#segments.length; i++) {
-      if (!this.#segments[i].finished) return i;
-    }
-    return this.#segments.length;
-  }
-
-  #finishSegment(idx) {
-    if (this.#closed || this.#segments[idx].finished) return;
-    this.#segments[idx].finished = true;
-    // Drain buffered audio of following segments up to the new frontier.
-    for (let i = idx + 1; i < this.#segments.length; i++) {
-      const seg = this.#segments[i];
-      for (const buf of seg.buffered.splice(0)) this.#cb.onAudio(buf);
-      if (!seg.finished) break;
-    }
-    if (this.#ended && this.#segments.every((s) => s.finished)) this.#cb.onFinish();
-  }
-
-  #last() {
-    return this.#segments[this.#segments.length - 1];
-  }
-
-  pushText(text) {
-    if (this.#closed || !text) return;
-    const seg = this.#last();
-    seg.gotText = true;
-    seg.handle.pushText(text);
-  }
-
-  setVoice(referenceId) {
-    if (this.#closed) return;
-    this.#sealLast();
-    this.#openSegment(referenceId);
-  }
-
-  endInput() {
-    if (this.#closed) return;
-    this.#ended = true;
-    this.#sealLast();
-  }
-
-  // Close the current segment's input. A segment that never received text
-  // won't get a Fish "finish" event worth waiting for — drop it directly.
-  #sealLast() {
-    const seg = this.#last();
-    const idx = this.#segments.length - 1;
-    if (seg.gotText) {
-      seg.handle.endInput();
-    } else {
-      seg.handle.close();
-      this.#finishSegment(idx);
-    }
-  }
-
-  close() {
-    this.#closed = true;
-    for (const seg of this.#segments) seg.handle.close();
-  }
-}
 
 // ---------------------------------------------------------------------------
 // Session — one per browser websocket. Owns the Deepgram connection, the
@@ -828,8 +645,13 @@ class Session {
       onError: (err) => {
         console.error("[fish]", err.message);
         if (this.turn?.id !== turn.id) return;
+        // A single segment erroring (e.g. after a voice change) is NOT fatal:
+        // the pipeline marks it finished and keeps delivering the healthy
+        // segments, and onFinish still fires. Only give up when the turn has
+        // produced no audio at all — a genuine startup failure.
+        if (turn.firstAudioWall !== 0) return;
         this.turn = null;
-        turn.fish?.close(); // a failed segment must not leave siblings running
+        turn.fish?.close();
         this.sendJson({ type: "error", message: "TTS error" });
         this.sendJson({ type: "agent_done" });
       },
@@ -859,19 +681,23 @@ class Session {
 
   // A directive the LLM emitted mid-reply. Voice changes land exactly where
   // the tag sat in the text; session-level state is staged so speculative
-  // rollbacks leave no trace.
+  // rollbacks leave no trace. Directives that change nothing (the model
+  // repeating a tag, or naming the voice it's already using) are dropped —
+  // every needless setVoice spawns a Fish socket for no reason.
   #applyDirective(turn, { kind, id }) {
+    const effVoice = () => turn.pendingState.voiceId ?? this.voiceId;
+    const effPersona = () => turn.pendingState.personaId ?? this.personaId;
     if (kind === "voice") {
       const v = VOICES[id];
-      if (!v) return;
+      if (!v || id === effVoice()) return;
       turn.fish.setVoice(v.id);
       this.#stageState(turn, { voiceId: id });
       this.#deliver(turn, "json", { type: "tool", tool: "change_voice", voice: id });
       console.log(`[session] ${this.sid} directive: voice -> ${id}`);
     } else if (kind === "persona") {
       const p = PERSONAS[id];
-      if (!p) return;
-      turn.fish.setVoice(VOICES[p.voice].id);
+      if (!p || id === effPersona()) return;
+      if (p.voice !== effVoice()) turn.fish.setVoice(VOICES[p.voice].id);
       this.#stageState(turn, { personaId: id, voiceId: p.voice });
       this.#deliver(turn, "json", { type: "tool", tool: "change_persona", persona: id, voice: p.voice });
       console.log(`[session] ${this.sid} directive: persona -> ${id}`);

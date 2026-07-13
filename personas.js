@@ -169,11 +169,13 @@ const TOOL_RULES =
   "persona, when the user asks. Do it by writing a tag inline in your " +
   "reply, exactly like [[voice:rhys]] or [[persona:narrator]]. The tag is " +
   "silent and invisible; everything you say after it comes out in the new " +
-  "voice, so place it mid-reply and keep talking — for example: \"Sure — " +
-  "[[voice:maeve]] how do I sound now?\". If the user asks for a kind of " +
-  `voice, pick the best fit yourself. Voices: ${voiceList}. Personas: ` +
-  `${personaList}. Only emit a tag when the user asks for a change, and ` +
-  "never mention tags or say their names as commands.";
+  "voice. Put the tag at the very START of your reply so the whole answer " +
+  "is heard in the new voice — for example: \"[[voice:maeve]] There we go " +
+  "— how do I sound now?\". Write each tag exactly once and never repeat " +
+  "it. If the user asks for a kind of voice, pick the best fit yourself. " +
+  `Voices: ${voiceList}. Personas: ${personaList}. Only emit a tag when ` +
+  "the user asks for a change, and never mention tags or say their names " +
+  "as commands.";
 
 export function systemPromptFor(personaKey) {
   const p = PERSONAS[personaKey] ?? PERSONAS[DEFAULT_PERSONA];

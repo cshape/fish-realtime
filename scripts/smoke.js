@@ -19,10 +19,12 @@ import path from "node:path";
 import WebSocket from "ws";
 
 const PORT = Number(process.env.PORT || 8787);
+// Turn 1 tends to flip the persona to narrator (alistair, British male) on
+// its own, so turn 3 must ask for a voice that can't already be active.
 const QUESTIONS = [
   "Please tell me a nice long story about a fish.",
   "What is two plus two?",
-  "Please switch to a British male voice right now.",
+  "Please switch to a female American voice right now.",
 ];
 
 const CHUNK = 1024; // 32 ms @ 16 kHz mono PCM16
@@ -123,15 +125,16 @@ function onAgentDone() {
       if (finals.length < 2) break; // done event from an earlier fragment
       if (clears < 1) fail("no clear event after barge-in");
       if (audioAfterClear < 24000) fail("no reply audio after barge-in");
-      console.log("[smoke] barge-in ok — asking for a British male voice…");
+      console.log("[smoke] barge-in ok — asking for a female American voice…");
+      toolEvent = null; // turn 1 may have emitted its own persona directive
       enqueue(utterances[2]);
       phase = "voicetool";
       break;
     case "voicetool":
       if (!toolEvent) break; // model may still be mid-reply on a first done
       if (toolEvent.tool !== "change_voice") fail(`unexpected tool event: ${JSON.stringify(toolEvent)}`);
-      if (!["alistair", "rhys"].includes(toolEvent.voice)) {
-        fail(`asked for British male, got "${toolEvent.voice}"`);
+      if (!["marlowe", "marley"].includes(toolEvent.voice)) {
+        fail(`asked for female American, got "${toolEvent.voice}"`);
       }
       if (toolAudio < 12000) fail(`no audio after the voice change (${toolAudio}B)`);
       console.log(`[smoke] directive ok (voice -> ${toolEvent.voice}) — testing UI set_voice…`);
