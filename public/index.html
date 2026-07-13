@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Fish Audio — Realtime</title>
+  <meta name="description" content="Talk to a live voice agent built on Fish Audio. Interrupt it, change its voice mid-sentence, hand it a new role — all in realtime." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Onest:wght@200;300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/styles.css" />
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Cpath d='M4 16c5-7 13-9 22-6-1 2-1 4 2 6-3 2-3 4-2 6-9 3-17 1-22-6z' fill='%230d9488'/%3E%3Ccircle cx='9' cy='15' r='1.6' fill='%23faf8f5'/%3E%3C/svg%3E" />
+</head>
+<body>
+  <canvas id="scene" aria-hidden="true"></canvas>
+
+  <div id="app">
+    <header>
+      <a class="brand" href="https://fish.audio" target="_blank" rel="noopener">
+        <svg class="mark" viewBox="0 0 32 32" aria-hidden="true">
+          <path d="M4 16c5-7 13-9 22-6-1 2-1 4 2 6-3 2-3 4-2 6-9 3-17 1-22-6z" />
+          <circle class="eye" cx="9" cy="15" r="1.6" />
+        </svg>
+        <span class="brand-name">Fish&nbsp;Audio</span>
+        <span class="brand-tag">realtime</span>
+      </a>
+      <button id="voice-chip" class="chip hidden" aria-haspopup="dialog">
+        <span class="chip-dot" aria-hidden="true"></span>
+        <span id="voice-chip-name">Voice</span>
+      </button>
+    </header>
+
+    <main>
+      <div id="stage">
+        <!-- Idle hero -->
+        <div id="hero">
+          <h1>Talk to it.</h1>
+          <p class="sub">A live voice agent built on Fish&nbsp;Audio.<br />
+          Interrupt it mid&#8209;sentence. Ask it to change its voice.</p>
+        </div>
+
+        <!-- Live captions -->
+        <div id="captions" class="hidden" aria-live="polite">
+          <p id="user-line"></p>
+          <p id="agent-line"></p>
+        </div>
+      </div>
+
+      <div id="dock">
+        <button id="orb" class="idle" aria-label="Start talking">
+          <span class="orb-ring" aria-hidden="true"></span>
+          <span class="orb-core" aria-hidden="true">
+            <svg id="ic-mic" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round">
+              <rect x="9" y="3" width="6" height="11" rx="3" />
+              <path d="M5 11a7 7 0 0 0 14 0" />
+              <path d="M12 18v3" />
+            </svg>
+            <svg id="ic-stop" viewBox="0 0 24 24" fill="currentColor" class="hidden">
+              <rect x="7" y="7" width="10" height="10" rx="1.5" />
+            </svg>
+          </span>
+        </button>
+        <p id="status">tap to start talking</p>
+
+        <nav id="personas" aria-label="Personas"></nav>
+      </div>
+    </main>
+
+    <footer>
+      <span id="latency" class="mono"></span>
+      <span class="foot-spacer"></span>
+      <button id="about-link" class="foot-link">about</button>
+      <span class="foot-dot">·</span>
+      <a class="foot-link" href="https://fish.audio" target="_blank" rel="noopener">powered by Fish&nbsp;Audio</a>
+    </footer>
+  </div>
+
+  <div id="toast" class="hidden" role="status"></div>
+
+  <!-- Voice picker -->
+  <div id="voice-sheet" class="sheet hidden" role="dialog" aria-label="Choose a voice">
+    <div class="sheet-backdrop" data-close></div>
+    <div class="sheet-card">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <h2>Choose a voice</h2>
+      <p class="sheet-hint">Or just ask — <em>“make your voice British”</em></p>
+      <div id="voice-grid"></div>
+    </div>
+  </div>
+
+  <!-- About -->
+  <div id="about-sheet" class="sheet hidden" role="dialog" aria-label="About">
+    <div class="sheet-backdrop" data-close></div>
+    <div class="sheet-card">
+      <div class="sheet-handle" aria-hidden="true"></div>
+      <h2>Realtime voice, end to end</h2>
+      <p class="about-p">Everything you hear is generated live: your speech is transcribed
+      as you talk, a language model thinks, and <a href="https://fish.audio" target="_blank" rel="noopener">Fish&nbsp;Audio</a>’s
+      text&#8209;to&#8209;speech answers — streamed back in well under a second.</p>
+      <div class="about-uses">
+        <div class="use"><h3>Companions</h3><p>Agents with warmth, memory, and a personality worth returning to.</p></div>
+        <div class="use"><h3>Living content</h3><p>Text that talks back — stories, docs, and lessons you can interrupt.</p></div>
+        <div class="use"><h3>Customer service</h3><p>Smooth, respectful voice support that never puts anyone on hold.</p></div>
+      </div>
+      <div class="about-try">
+        <h3>While you’re here</h3>
+        <p>Interrupt it mid&#8209;sentence. Say <em>“switch to a British voice”</em>.
+        Ask the Narrator for a story about your day.</p>
+      </div>
+      <a class="cta" href="https://fish.audio" target="_blank" rel="noopener">Build with Fish Audio</a>
+    </div>
+  </div>
+
+  <script type="module" src="/app.js"></script>
+</body>
+</html>
