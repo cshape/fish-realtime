@@ -1,8 +1,8 @@
 // LiveKit-mode agent worker. The same product as server.js's fish pipeline,
-// rebuilt on LiveKit Agents with every model served through LiveKit Inference:
-// Deepgram Flux STT (same EOT settings), Gemma 4 31B, and Fish s2.1-pro with
-// the same voice reference ids. Spawned by server.js when LIVEKIT_* creds are
-// present; the browser side lives at /lk.
+// rebuilt on LiveKit Agents: Deepgram Flux STT (direct /v2/listen, BYO
+// DEEPGRAM_API_KEY — the inference-gateway hop cost ~1.5s of turn latency),
+// Gemma 4 31B via LiveKit Inference, and the Fish TTS plugin with the same
+// voice reference ids. Hosted on LiveKit Cloud; the browser side lives at /lk.
 //
 // Latency parity: fish mode reports voice-to-voice as (last audible mic chunk
 // arriving at the server) -> (first reply audio written to the client socket).
@@ -13,12 +13,13 @@
 // final downstream hop to the browser.
 
 import { cli, defineAgent, inference, voice, ServerOptions } from "@livekit/agents";
+import * as deepgram from "@livekit/agents-plugin-deepgram";
 import * as fishaudio from "@livekit/agents-plugin-fishaudio";
 import { fileURLToPath } from "node:url";
 import { VOICES, PERSONAS, DEFAULT_PERSONA, lkSystemPromptFor, pickGreeting } from "./personas.js";
 import { INACTIVITY_CONFIG } from "./public/config.js";
 
-const STT_MODEL = process.env.LK_STT_MODEL || "deepgram/flux-general-en";
+const STT_MODEL = process.env.LK_STT_MODEL || "flux-general-en";
 const LLM_MODEL = process.env.LK_LLM_MODEL || "google/gemma-4-31b-it";
 // Override for local dev so a dev worker never collides with the deployed
 // agent registered under the production name on the same LiveKit project.
@@ -35,14 +36,16 @@ export default defineAgent({
     const voiceRef = VOICES[persona.voice].id;
 
     const session = new voice.AgentSession({
-      stt: new inference.STT({
+      // Direct Deepgram Flux over /v2/listen (DEEPGRAM_API_KEY), skipping the
+      // LiveKit inference gateway — the extra hop delayed Flux's view of the
+      // user's silence and turn confirmations landed ~1.5s late. Thresholds
+      // are tuned aggressive (snappier than fish mode's 0.7/0.5): quicker
+      // turn commits and earlier speculative generation.
+      stt: new deepgram.STTv2({
         model: STT_MODEL,
-        modelOptions: {
-          // Mirrors the fish-mode Deepgram Flux settings in server.js.
-          eot_threshold: Number(process.env.DEEPGRAM_EOT_THRESHOLD || 0.7),
-          eager_eot_threshold: Number(process.env.DEEPGRAM_EAGER_EOT_THRESHOLD || 0.5),
-          eot_timeout_ms: Number(process.env.DEEPGRAM_EOT_TIMEOUT_MS || 3000),
-        },
+        eotThreshold: Number(process.env.DEEPGRAM_EOT_THRESHOLD || 0.6),
+        eagerEotThreshold: Number(process.env.DEEPGRAM_EAGER_EOT_THRESHOLD || 0.4),
+        eotTimeoutMs: Number(process.env.DEEPGRAM_EOT_TIMEOUT_MS || 3000),
       }),
       llm: new inference.LLM({
         model: LLM_MODEL,
@@ -81,6 +84,12 @@ export default defineAgent({
     let lastEou = null; // EOUMetrics for the turn the agent is about to answer
     const components = {}; // ttft / ttfb by speechId, for the breakdown log
 
+    let lastFinalWall = 0; // wall time the user turn's final transcript landed
+
+    session.on(voice.AgentSessionEventTypes.UserInputTranscribed, (ev) => {
+      if (ev.isFinal) lastFinalWall = ev.createdAt;
+    });
+
     session.on(voice.AgentSessionEventTypes.MetricsCollected, (ev) => {
       const m = ev.metrics;
       if (m.type === "eou_metrics") {
@@ -108,9 +117,14 @@ export default defineAgent({
         llm: parts.ttft ?? null,
         tts: parts.ttfb ?? null,
       });
+      // tail: user stopped speaking -> Flux's final transcript (turn commit).
+      // confirm: turn commit -> first reply audio published. Splitting the
+      // total here is what located the inference-gateway stall.
+      const tail = lastFinalWall ? Math.round(lastFinalWall - eou.lastSpeakingTimeMs) : null;
+      const confirm = lastFinalWall ? Math.round(ev.createdAt - lastFinalWall) : null;
       console.log(
-        `[lk-agent] voice->voice ${total}ms (eou ${Math.round(eou.endOfUtteranceDelayMs)}ms, ` +
-        `stt ${Math.round(eou.transcriptionDelayMs)}ms, llm ttft ${parts.ttft ?? "?"}ms, tts ttfb ${parts.ttfb ?? "?"}ms)`,
+        `[lk-agent] voice->voice ${total}ms (tail ${tail ?? "?"}ms, confirm ${confirm ?? "?"}ms, ` +
+        `llm ttft ${parts.ttft ?? "?"}ms, tts ttfb ${parts.ttfb ?? "?"}ms)`,
       );
     });
 
