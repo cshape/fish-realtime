@@ -25,10 +25,14 @@ browser spk <── PCM16 @24k ── server <── Fish TTS         (/v1/tts/l
   `[[persona:narrator]]`); the server strips them from the stream and swaps
   the Fish voice **mid-reply** ("Sure — *[voice changes]* — how's this?").
   Later voice segments synthesize concurrently and are delivered in order.
-- **The page** (`public/`) — Fish Audio's design language (Onest, warm gray
-  scale, light/dark) over an audio-reactive ink-in-water canvas: the agent's
-  voice blooms from the orb, the user's voice sends out rings, the tint
-  crossfades per persona. Zero chrome, mobile-first.
+- **The page** (`public/`) — Fish Audio's design language (Onest, canonical
+  warm-gray scale) over an audio-reactive canvas. Horizontal ribbons use
+  state-driven Fish colors for listening, thinking, and speaking. The live
+  surface is text-free and mobile-first.
+- **Inactivity handling** (`public/config.js`) — after 10 seconds without
+  confirmed user speech, the active persona checks in naturally. At 30 seconds
+  the browser ends the conversation. The same client-safe config module holds
+  shared audio and visual settings; provider credentials remain in `.env`.
 - Barge-in, echo suppression, and speculative (eager) generation are inherited
   from fish-bare-agent and always on.
 
@@ -43,19 +47,18 @@ npm start              # http://localhost:8787
 ```
 
 Headless end-to-end test (macOS, uses `say` as the mic) — covers greeting,
-barge-in, the `[[voice:x]]` directive round-trip, and UI voice switching:
+barge-in and the `[[voice:x]]` directive round-trip:
 
 ```sh
 npm run smoke
 ```
 
-`?nomic` runs a session without microphone capture (preview/dev: you hear the
-agent and can drive personas/voices from the UI).
+`?nomic` runs a session without microphone capture for preview and development.
 
 Voices are Fish reference IDs in `personas.js` — edit the catalog to recast.
 
 ## Notes
 
 - Phone testing needs an HTTPS origin for the mic (e.g. `ngrok http 8787`).
-- The scene pauses in hidden tabs (RAF) and falls back to a static wash under
-  `prefers-reduced-motion`.
+- The browser throttles the continuously scheduled scene in hidden tabs; under
+  `prefers-reduced-motion` it falls back to a static wash.

@@ -28,6 +28,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import { VOICES, PERSONAS, DEFAULT_PERSONA, systemPromptFor, publicCatalog } from "./personas.js";
 import { FishPipeline, TTS_SAMPLE_RATE } from "./tts.js";
+import { AUDIO_CONFIG, INACTIVITY_CONFIG } from "./public/config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -54,7 +55,7 @@ required("FISH_API_KEY"); // consumed by tts.js
 const FISH_MODEL = process.env.FISH_MODEL || "s2.1-pro";
 const FISH_LATENCY_MODE = process.env.FISH_LATENCY_MODE || "balanced"; // normal | balanced | low
 
-const MIC_SAMPLE_RATE = 16000; // browser -> Deepgram; TTS_SAMPLE_RATE from tts.js
+const MIC_SAMPLE_RATE = AUDIO_CONFIG.inputSampleRate; // browser -> Deepgram; TTS_SAMPLE_RATE from tts.js
 
 // Energy gate for latency measurement (NOT for turn-taking — that's Flux's
 // job). A mic chunk whose RMS clears this is treated as "the user is audibly
@@ -230,7 +231,7 @@ async function streamLLM(messages, signal, onDelta) {
       model: LLM_MODEL,
       messages,
       stream: true,
-      temperature: 0.6,
+      temperature: 1.5,
       max_tokens: 500,
     }),
   });
@@ -343,6 +344,17 @@ class Session {
       this.sendClear();
       this.#startSpokenLine(v.preview);
     }
+  }
+
+  triggerInactivityNudge() {
+    // Never interrupt an active turn. The browser retries this narrow command
+    // while preserving the original 30-second disconnect deadline.
+    if (this.turn || this.agentAudible()) {
+      this.sendJson({ type: "inactivity_nudge_deferred" });
+      return;
+    }
+    this.sendJson({ type: "inactivity_nudge_started" });
+    this.#startTurn(INACTIVITY_CONFIG.prompt, { speculative: false, systemEvent: true });
   }
 
   sendJson(obj) {
@@ -547,7 +559,7 @@ class Session {
     if (kind === "audio") {
       if (turn.firstDeliveredWall === 0) {
         turn.firstDeliveredWall = Date.now();
-        if (!turn.spokenLine) this.#sendMetrics(turn);
+        if (!turn.spokenLine && !turn.systemEvent) this.#sendMetrics(turn);
       }
       this.sendAudio(data);
     } else {
@@ -596,7 +608,7 @@ class Session {
       // LLM already finished, #runAgentTurn recorded the exchange; don't
       // record it twice.)
       if (t.spoken && !t.inHistory) {
-        if (t.userText) this.history.push({ role: "user", content: t.userText });
+        if (t.userText && !t.systemEvent) this.history.push({ role: "user", content: t.userText });
         this.history.push({ role: "assistant", content: t.spoken + "…" });
       }
       this.sendClear(); // flush queued playback everywhere
@@ -604,7 +616,7 @@ class Session {
     // Speculative turns roll back silently: no client messages, no history.
   }
 
-  #newTurn(userText, { speculative = false, spokenLine = false } = {}) {
+  #newTurn(userText, { speculative = false, spokenLine = false, systemEvent = false } = {}) {
     return {
       id: ++this.turnCounter,
       userText,
@@ -616,6 +628,7 @@ class Session {
       inHistory: false,
       eager: speculative,
       spokenLine, // greeting / voice preview: no LLM, no metrics
+      systemEvent, // synthetic committed LLM turn; not attributed to the user
       pendingState: {}, // directive-staged {personaId, voiceId}
       outbox: [],
       // Latency bookkeeping (wall-clock ms)
@@ -673,8 +686,9 @@ class Session {
     this.history.push({ role: "assistant", content: text });
   }
 
-  #startTurn(userText, { speculative }) {
-    const turn = this.#newTurn(userText, { speculative });
+  #startTurn(userText, { speculative, systemEvent = false }) {
+    const turn = this.#newTurn(userText, { speculative, systemEvent });
+    if (systemEvent) turn.committed = true;
     this.turn = turn;
     this.#runAgentTurn(turn);
   }
@@ -734,7 +748,7 @@ class Session {
         [
           { role: "system", content: systemPromptFor(this.personaId) },
           ...this.history,
-          { role: "user", content: turn.userText },
+          { role: turn.systemEvent ? "system" : "user", content: turn.userText },
         ],
         turn.abort.signal,
         (delta) => {
@@ -755,10 +769,14 @@ class Session {
       pushToFish(chunker.flush());
       turn.fish.endInput();
       turn.inHistory = true;
-      this.history.push(
-        { role: "user", content: turn.userText },
-        { role: "assistant", content: full },
-      );
+      if (turn.systemEvent) {
+        this.history.push({ role: "assistant", content: full });
+      } else {
+        this.history.push(
+          { role: "user", content: turn.userText },
+          { role: "assistant", content: full },
+        );
+      }
     } catch (err) {
       if (err.name === "AbortError") return; // barge-in / rollback — handled
       console.error("[llm]", err.message);
@@ -854,6 +872,8 @@ server.on("upgrade", (req, socket, head) => {
           session.setPersona(msg.id, { greet: msg.greet !== false });
         } else if (msg.type === "set_voice") {
           session.setVoice(msg.id, { preview: msg.preview !== false });
+        } else if (msg.type === "inactivity_nudge") {
+          session.triggerInactivityNudge();
         }
       } catch {}
     });

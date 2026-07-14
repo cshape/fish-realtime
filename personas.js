@@ -67,6 +67,14 @@ export const VOICES = {
     accent: "British",
     preview: "Briony, hello! Fresh voice, same conversation. Go on.",
   },
+  sienna: {
+    key: "sienna",
+    id: "ca3007f96ae7499ab87d27ea3599956a",
+    name: "Sienna",
+    gender: "female",
+    accent: "American",
+    preview: "Sienna here. I think this voice suits us rather nicely, don't you?",
+  },
 };
 
 // Spoken-aloud ground rules shared by every persona.
@@ -82,7 +90,7 @@ export const PERSONAS = {
     name: "Guide",
     tagline: "shows you around",
     voice: "marlowe",
-    theme: { tint: "#0d9488", glow: "#2dd4bf" },
+    theme: { tint: "#2a9d90", glow: "#3ccb7f" },
     greeting:
       "Hey — you're live with Fish Audio. Interrupt me mid-sentence, ask " +
       "me to switch voices, or just talk. What should we try first?",
@@ -101,8 +109,8 @@ export const PERSONAS = {
     key: "companion",
     name: "Companion",
     tagline: "someone to talk to",
-    voice: "marley",
-    theme: { tint: "#e8927c", glow: "#f4b8a4" },
+    voice: "sienna",
+    theme: { tint: "#e76e50", glow: "#f4a462" },
     greeting:
       "Oh hey, you made it. I was hoping someone interesting would show " +
       "up. Tell me about your day — the weird part, not the small talk.",
@@ -119,7 +127,7 @@ export const PERSONAS = {
     name: "Narrator",
     tagline: "brings words to life",
     voice: "alistair",
-    theme: { tint: "#6366f1", glow: "#a5b4fc" },
+    theme: { tint: "#175cd3", glow: "#53b1fd" },
     greeting:
       "Every story starts with a single line. Give me anything — a word, " +
       "a memory, a headline — and I'll make it worth hearing.",
@@ -136,7 +144,7 @@ export const PERSONAS = {
     name: "Concierge",
     tagline: "at your service",
     voice: "maeve",
-    theme: { tint: "#5f8f6a", glow: "#a3c4a8" },
+    theme: { tint: "#087443", glow: "#3ccb7f" },
     greeting:
       "Good evening, and welcome to the Driftwater. How may I make your " +
       "stay more comfortable?",
