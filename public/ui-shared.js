@@ -130,18 +130,23 @@ export function createVoiceMeter(onReplyMs) {
   let lastMicVoiceWall = 0;
   let awaitingReply = false;
   let quietTicks = 99;
+  let voicedTicks = 0;
   return {
     mic(rms) {
       if (rms > VOICE_METER.voiceRms) {
+        voicedTicks++;
         lastMicVoiceWall = performance.now();
-        awaitingReply = true;
+        if (voicedTicks >= VOICE_METER.armTicks) awaitingReply = true;
+      } else {
+        voicedTicks = 0;
       }
     },
     agent(rms) {
       if (rms > VOICE_METER.voiceRms) {
         if (quietTicks >= VOICE_METER.quietTicks && awaitingReply && lastMicVoiceWall) {
           awaitingReply = false;
-          onReplyMs(Math.round(performance.now() - lastMicVoiceWall));
+          const ms = Math.round(performance.now() - lastMicVoiceWall);
+          if (ms >= VOICE_METER.minPlausibleMs) onReplyMs(ms);
         }
         quietTicks = 0;
       } else {
@@ -152,6 +157,7 @@ export function createVoiceMeter(onReplyMs) {
       lastMicVoiceWall = 0;
       awaitingReply = false;
       quietTicks = 99;
+      voicedTicks = 0;
     },
   };
 }

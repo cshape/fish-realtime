@@ -20,6 +20,13 @@ export const AUDIO_CONFIG = Object.freeze({
 export const VOICE_METER = Object.freeze({
   voiceRms: 0.02,
   quietTicks: 3,
+  // Arm the stopwatch only after this many consecutive voiced mic ticks
+  // (~100ms+): a breath, a bump, or speaker bleed of the agent's own audio
+  // must not count as "the user spoke".
+  armTicks: 3,
+  // No real STT->LLM->TTS round trip is faster than this; anything below is
+  // a measurement artifact and is dropped.
+  minPlausibleMs: 200,
 });
 
 // LLM sampling params, shared by fish mode (server.js) and /lk (lk-agent.js)
