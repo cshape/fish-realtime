@@ -1,0 +1,96 @@
+diff --git a/node_modules/@livekit/agents-plugin-fishaudio/dist/tts.cjs b/node_modules/@livekit/agents-plugin-fishaudio/dist/tts.cjs
+index 3cc1d61..9eb7889 100644
+--- a/node_modules/@livekit/agents-plugin-fishaudio/dist/tts.cjs
++++ b/node_modules/@livekit/agents-plugin-fishaudio/dist/tts.cjs
+@@ -296,13 +296,6 @@ class SynthesizeStream extends import_agents.tts.SynthesizeStream {
+         ws.send(Buffer.from((0, import_msgpack.encode)({ event: "stop" })));
+       }
+     };
+-    let lastFrame;
+-    const sendLastFrame = (final) => {
+-      if (lastFrame) {
+-        this.queue.put({ requestId, segmentId: requestId, frame: lastFrame, final });
+-        lastFrame = void 0;
+-      }
+-    };
+     const recvTask = async () => {
+       const onMessage = (raw) => {
+         let frame;
+@@ -325,8 +318,7 @@ class SynthesizeStream extends import_agents.tts.SynthesizeStream {
+           const audio = parsed.audio;
+           if (audio && audio.byteLength > 0) {
+             for (const f of bstream.write(audio)) {
+-              sendLastFrame(false);
+-              lastFrame = f;
++              this.queue.put({ requestId, segmentId: requestId, frame: f, final: false });
+             }
+           }
+         } else if (event === "finish") {
+@@ -340,11 +332,15 @@ class SynthesizeStream extends import_agents.tts.SynthesizeStream {
+             );
+             return;
+           }
+-          for (const f of bstream.flush()) {
+-            sendLastFrame(false);
+-            lastFrame = f;
++          const remainingFrames = [...bstream.flush()];
++          for (const [idx, f] of remainingFrames.entries()) {
++            this.queue.put({
++              requestId,
++              segmentId: requestId,
++              frame: f,
++              final: idx === remainingFrames.length - 1
++            });
+           }
+-          sendLastFrame(true);
+           if (!this.queue.closed) {
+             this.queue.put(SynthesizeStream.END_OF_STREAM);
+           }
+diff --git a/node_modules/@livekit/agents-plugin-fishaudio/dist/tts.js b/node_modules/@livekit/agents-plugin-fishaudio/dist/tts.js
+index 009f5cb..5cb92f8 100644
+--- a/node_modules/@livekit/agents-plugin-fishaudio/dist/tts.js
++++ b/node_modules/@livekit/agents-plugin-fishaudio/dist/tts.js
+@@ -280,13 +280,6 @@ class SynthesizeStream extends tts.SynthesizeStream {
+         ws.send(Buffer.from(encode({ event: "stop" })));
+       }
+     };
+-    let lastFrame;
+-    const sendLastFrame = (final) => {
+-      if (lastFrame) {
+-        this.queue.put({ requestId, segmentId: requestId, frame: lastFrame, final });
+-        lastFrame = void 0;
+-      }
+-    };
+     const recvTask = async () => {
+       const onMessage = (raw) => {
+         let frame;
+@@ -309,8 +302,7 @@ class SynthesizeStream extends tts.SynthesizeStream {
+           const audio = parsed.audio;
+           if (audio && audio.byteLength > 0) {
+             for (const f of bstream.write(audio)) {
+-              sendLastFrame(false);
+-              lastFrame = f;
++              this.queue.put({ requestId, segmentId: requestId, frame: f, final: false });
+             }
+           }
+         } else if (event === "finish") {
+@@ -324,11 +316,15 @@ class SynthesizeStream extends tts.SynthesizeStream {
+             );
+             return;
+           }
+-          for (const f of bstream.flush()) {
+-            sendLastFrame(false);
+-            lastFrame = f;
++          const remainingFrames = [...bstream.flush()];
++          for (const [idx, f] of remainingFrames.entries()) {
++            this.queue.put({
++              requestId,
++              segmentId: requestId,
++              frame: f,
++              final: idx === remainingFrames.length - 1
++            });
+           }
+-          sendLastFrame(true);
+           if (!this.queue.closed) {
+             this.queue.put(SynthesizeStream.END_OF_STREAM);
+           }

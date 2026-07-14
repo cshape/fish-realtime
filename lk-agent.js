@@ -13,13 +13,16 @@
 // final downstream hop to the browser.
 
 import { cli, defineAgent, inference, voice, ServerOptions } from "@livekit/agents";
+import * as fishaudio from "@livekit/agents-plugin-fishaudio";
 import { fileURLToPath } from "node:url";
 import { VOICES, PERSONAS, DEFAULT_PERSONA, lkSystemPromptFor, pickGreeting } from "./personas.js";
 import { INACTIVITY_CONFIG } from "./public/config.js";
 
 const STT_MODEL = process.env.LK_STT_MODEL || "deepgram/flux-general-en";
 const LLM_MODEL = process.env.LK_LLM_MODEL || "google/gemma-4-31b-it";
-const TTS_MODEL = process.env.LK_TTS_MODEL || "fishaudio/s2.1-pro";
+// Override for local dev so a dev worker never collides with the deployed
+// agent registered under the production name on the same LiveKit project.
+const AGENT_NAME = process.env.LK_AGENT_NAME || "fish-lk";
 
 export default defineAgent({
   entry: async (ctx) => {
@@ -46,13 +49,26 @@ export default defineAgent({
         // Mirrors the fish-mode LLM call params.
         modelOptions: { temperature: 1.5, max_completion_tokens: 500 },
       }),
-      tts: new inference.TTS({
-        model: TTS_MODEL,
-        voice: voiceRef,
-        modelOptions: { latency_mode: process.env.FISH_LATENCY_MODE || "low" },
+      // Direct Fish plugin (FISH_API_KEY), not the inference gateway: same
+      // crackle-free path as livekit-demo, patched (patches/) with
+      // livekit/agents-js#2033 so audio streams from the opening chunk.
+      tts: new fishaudio.TTS({
+        model: process.env.FISH_MODEL || "s2.1-pro",
+        voiceId: voiceRef,
+        latencyMode: process.env.FISH_LATENCY_MODE || "low",
       }),
       // Matches fish mode's 10s "still there?" nudge window.
       userAwayTimeout: INACTIVITY_CONFIG.nudgeAfterMs / 1000,
+      turnHandling: {
+        // Flux owns turn-taking (EndOfTurn / EagerEndOfTurn), same as fish
+        // mode — no separate turn-detector model, no added endpointing floor.
+        turnDetection: "stt",
+        endpointing: { minDelay: 0 },
+        // Speculate LLM + TTS on Flux's EagerEndOfTurn, play on EndOfTurn.
+        // This is the same bet fish mode's engine makes, so voice-to-voice
+        // numbers stay comparable.
+        preemptiveGeneration: { enabled: true, preemptiveTts: true },
+      },
     });
 
     const sendData = (obj) => {
@@ -124,4 +140,4 @@ export default defineAgent({
   },
 });
 
-cli.runApp(new ServerOptions({ agent: fileURLToPath(import.meta.url), agentName: "fish-lk" }));
+cli.runApp(new ServerOptions({ agent: fileURLToPath(import.meta.url), agentName: AGENT_NAME }));

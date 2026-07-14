@@ -1,0 +1,11 @@
+node_modules
+.env
+.env.*
+!.env.example
+.git
+public
+!public/config.js
+scripts
+README.md
+server.js
+tts.js

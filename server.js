@@ -832,7 +832,12 @@ async function lkToken(personaParam) {
   });
   at.addGrant({ roomJoin: true, room, canPublish: true, canSubscribe: true, canPublishData: true });
   at.roomConfig = new RoomConfiguration({
-    agents: [new RoomAgentDispatch({ agentName: "fish-lk", metadata: JSON.stringify({ persona }) })],
+    agents: [
+      new RoomAgentDispatch({
+        agentName: process.env.LK_AGENT_NAME || "fish-lk",
+        metadata: JSON.stringify({ persona }),
+      }),
+    ],
   });
   return { url: process.env.LIVEKIT_URL, token: await at.toJwt(), room, persona };
 }
@@ -949,9 +954,10 @@ server.listen(PORT, () => {
   console.log(`  livekit mode (/lk): ${LK_ENABLED ? "enabled" : "disabled (set LIVEKIT_* env vars)"}`);
 });
 
-// The LiveKit agent worker rides along in the same service: one deployable
-// unit on Render, one `node server.js` locally.
-if (LK_ENABLED && !process.env.LK_AGENT_DISABLED) {
+// The LiveKit agent worker is hosted on LiveKit Cloud (see Dockerfile +
+// livekit.toml; deploy with `lk agent deploy`). Running it inside this
+// service OOM'd the Render instance, so the local spawn is opt-in dev-only.
+if (LK_ENABLED && process.env.LK_AGENT_LOCAL) {
   const spawnLkAgent = () => {
     const child = spawn(process.execPath, [path.join(__dirname, "lk-agent.js"), "start"], {
       stdio: "inherit",

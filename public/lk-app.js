@@ -26,6 +26,9 @@ let room = null;
 let running = false;
 let connecting = false;
 let muted = false;
+let meterCtx = null; // WebAudio context for local level metering
+let meterTimer = 0;
+const meters = { mic: null, agent: null }; // AnalyserNodes
 
 let catalog = { personas: [], voices: [] };
 let personaId = "guide";
@@ -85,6 +88,43 @@ function fitPersonaLabels() {
   }
 }
 
+// --- level metering ---------------------------------------------------------
+// The scene animation runs off LOCAL WebAudio analysers (~45ms cadence, same
+// feel as the bare agent's worklet metering). LiveKit's ActiveSpeakersChanged
+// is a server round-trip and visibly lags the user's own voice.
+
+function meterTrack(kind, mediaStreamTrack) {
+  if (!mediaStreamTrack) return;
+  meterCtx ??= new AudioContext();
+  const src = meterCtx.createMediaStreamSource(new MediaStream([mediaStreamTrack]));
+  const analyser = meterCtx.createAnalyser();
+  analyser.fftSize = 512;
+  src.connect(analyser);
+  meters[kind] = analyser;
+  if (!meterTimer) {
+    const buf = new Float32Array(512);
+    const rms = (a) => {
+      if (!a) return 0;
+      a.getFloatTimeDomainData(buf);
+      let sum = 0;
+      for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
+      return Math.sqrt(sum / buf.length);
+    };
+    meterTimer = setInterval(() => {
+      scene.micLevel(muted ? 0 : Math.min(1, rms(meters.mic) / 0.18));
+      scene.agentLevel(Math.min(1, rms(meters.agent) * 4));
+    }, 45);
+  }
+}
+
+function stopMeters() {
+  clearInterval(meterTimer);
+  meterTimer = 0;
+  meters.mic = meters.agent = null;
+  meterCtx?.close().catch(() => {});
+  meterCtx = null;
+}
+
 function pickPersona(key) {
   const wasSelected = key === personaId;
   personaId = key;
@@ -128,6 +168,7 @@ async function start() {
       const el = track.attach();
       el.style.display = "none";
       document.body.appendChild(el);
+      meterTrack("agent", track.mediaStreamTrack);
     });
 
     room.on(LK.RoomEvent.DataReceived, (payload) => {
@@ -136,23 +177,13 @@ async function start() {
       } catch {}
     });
 
-    // Drive the ambient scene from LiveKit's speaker levels.
-    room.on(LK.RoomEvent.ActiveSpeakersChanged, (speakers) => {
-      let mic = 0;
-      let agent = 0;
-      for (const s of speakers) {
-        if (s === room.localParticipant) mic = s.audioLevel;
-        else agent = s.audioLevel;
-      }
-      scene.micLevel(muted ? 0 : Math.min(1, mic * 2.5));
-      scene.agentLevel(Math.min(1, agent * 2.5));
-    });
-
     room.on(LK.RoomEvent.Disconnected, () => stop());
 
     await room.connect(url, token);
     try {
       await room.localParticipant.setMicrophoneEnabled(true);
+      const pub = room.localParticipant.getTrackPublication(LK.Track.Source.Microphone);
+      meterTrack("mic", pub?.track?.mediaStreamTrack);
     } catch (err) {
       // No mic (denied / unavailable): stay in the session listen-only,
       // mirroring fish mode's ?nomic behavior.
@@ -177,6 +208,7 @@ async function stop() {
   document.body.classList.remove("session-fullscreen");
   const r = room;
   room = null;
+  stopMeters();
   try {
     await r?.disconnect();
   } catch {}

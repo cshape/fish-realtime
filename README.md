@@ -65,18 +65,23 @@ Voices are Fish reference IDs in `personas.js` — edit the catalog to recast.
 
 ## LiveKit mode (`/lk`)
 
-The same demo served over WebRTC via [LiveKit Agents](https://docs.livekit.io/agents/),
-with every model running through LiveKit Inference — no Deepgram/LLM keys needed
-for this mode:
+The same demo served over WebRTC via [LiveKit Agents](https://docs.livekit.io/agents/):
 
-- STT `deepgram/flux-general-en` (same EOT settings as fish mode)
-- LLM `google/gemma-4-31b-it`
-- TTS `fishaudio/s2.1-pro` with the same voice reference ids from `personas.js`
+- STT `deepgram/flux-general-en` via LiveKit Inference (same EOT settings as
+  fish mode; no Deepgram key needed in this mode)
+- LLM `google/gemma-4-31b-it` via LiveKit Inference
+- TTS `fishaudio` JS plugin (direct `FISH_API_KEY`, not the inference
+  gateway) with the same voice reference ids from `personas.js` — patched via
+  `patches/` with livekit/agents-js#2033 so audio streams from the opening
+  chunk (crackle-free, same behavior as the Python plugin)
 
-Set `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET`; `server.js`
-then spawns the agent worker (`lk-agent.js`) alongside itself and `/lk` goes
-live. Persona is chosen at join (dispatch metadata); switching personas
-mid-session starts a fresh room.
+The worker (`lk-agent.js`) is HOSTED ON LIVEKIT CLOUD — deploy updates with
+`lk agent deploy` (config in `livekit.toml`, image from `Dockerfile`, secret:
+`FISH_API_KEY`). The web service only needs `LIVEKIT_URL` / `LIVEKIT_API_KEY` /
+`LIVEKIT_API_SECRET` to mint tokens for `/lk`. For local agent dev run the
+server with `LK_AGENT_LOCAL=1 LK_AGENT_NAME=fish-lk-dev` so the dev worker
+never collides with the deployed one. Persona is chosen at join (dispatch
+metadata); switching personas mid-session starts a fresh room.
 
 Latency parity: fish mode reports voice→voice as last-audible-mic-chunk →
 first-audio-on-the-wire, measured in `server.js`. LiveKit mode reports the
