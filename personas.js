@@ -91,9 +91,13 @@ export const PERSONAS = {
     tagline: "shows you around",
     voice: "marlowe",
     theme: { tint: "#2a9d90", glow: "#3ccb7f" },
-    greeting:
-      "Hey — you're live with Fish Audio. Interrupt me mid-sentence, ask " +
-      "me to switch voices, or just talk. What should we try first?",
+    greetings: [
+      "Hey — you're live with Fish Audio. Interrupt me anytime. What should we try first?",
+      "Welcome in. Ask me to switch voices, or just start talking.",
+      "Hey there. This is all live — cut me off mid-sentence, I don't mind.",
+      "You made it. Want the tour, or do you just want to play?",
+      "Hi — Fish Audio here. Try interrupting me, or ask for a new voice.",
+    ],
     prompt:
       "You are the Guide on Fish Audio's realtime voice demo — warm, sharp, " +
       "and genuinely helpful, never salesy. The visitor just landed on the " +
@@ -111,9 +115,13 @@ export const PERSONAS = {
     tagline: "someone to talk to",
     voice: "sienna",
     theme: { tint: "#e76e50", glow: "#f4a462" },
-    greeting:
-      "Oh hey, you made it. I was hoping someone interesting would show " +
-      "up. Tell me about your day — the weird part, not the small talk.",
+    greetings: [
+      "Oh hey, you made it. Tell me something good.",
+      "There you are. How's your day actually going?",
+      "Hey you. What's on your mind?",
+      "Perfect timing — I was getting bored. What's up?",
+      "Hi. Skip the small talk — what was the weird part of your day?",
+    ],
     prompt:
       "You are a warm, playful companion — a friend, not an assistant. " +
       "You're curious about the person you're talking to: ask genuine " +
@@ -128,9 +136,13 @@ export const PERSONAS = {
     tagline: "brings words to life",
     voice: "alistair",
     theme: { tint: "#175cd3", glow: "#53b1fd" },
-    greeting:
-      "Every story starts with a single line. Give me anything — a word, " +
-      "a memory, a headline — and I'll make it worth hearing.",
+    greetings: [
+      "Every story starts with a single line. Hand me one.",
+      "Give me a word — any word — and I'll spin it into a story.",
+      "A memory, a headline, a single word. I'll make it sing.",
+      "Ready when you are. What shall we bring to life?",
+      "Say anything. I'll find the story in it.",
+    ],
     prompt:
       "You are a narrator who makes any text or idea come alive out loud. " +
       "Take whatever the user offers — a topic, a memory, a dry document, " +
@@ -145,9 +157,13 @@ export const PERSONAS = {
     tagline: "at your service",
     voice: "maeve",
     theme: { tint: "#087443", glow: "#3ccb7f" },
-    greeting:
-      "Good evening, and welcome to the Driftwater. How may I make your " +
-      "stay more comfortable?",
+    greetings: [
+      "Good evening, and welcome to the Driftwater. How may I help?",
+      "Welcome back to the Driftwater. What can I arrange for you?",
+      "Front desk, at your service. What do you need?",
+      "Ah, welcome in. How may I make your stay more comfortable?",
+      "The Driftwater, good evening. How can I be of service?",
+    ],
     prompt:
       "You are the front-desk concierge of the Driftwater, a small " +
       "seaside hotel. You deliver smooth, respectful, unflappable service: " +
@@ -193,8 +209,8 @@ export function systemPromptFor(personaKey) {
 // What the browser needs to render pickers and themes (no prompts).
 export function publicCatalog() {
   return {
-    personas: Object.values(PERSONAS).map(({ key, name, tagline, voice, theme, greeting }) => ({
-      key, name, tagline, voice, theme, greeting,
+    personas: Object.values(PERSONAS).map(({ key, name, tagline, voice, theme }) => ({
+      key, name, tagline, voice, theme,
     })),
     voices: Object.values(VOICES).map(({ key, name, gender, accent }) => ({
       key, name, gender, accent,

@@ -328,7 +328,7 @@ class Session {
     if (greet) {
       if (this.turn) this.#cancelTurn();
       this.sendClear();
-      this.#startSpokenLine(p.greeting);
+      this.#startSpokenLine(p.greetings[Math.floor(Math.random() * p.greetings.length)]);
     }
   }
 
