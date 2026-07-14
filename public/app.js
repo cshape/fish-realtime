@@ -35,6 +35,14 @@ let voiceId = null;
 let pendingPersona = null; // chosen while idle; applied on start
 let agentSpeaking = false;
 let userTurnActive = false;
+// Ear-to-ear voice→voice measurement (same definition as /lk): last mic chunk
+// with voice energy → first audible playback after a quiet gap, both observed
+// in this tab. The server's pipeline metrics still land in the console.
+let lastMicVoiceWall = 0;
+let awaitingReply = false;
+let agentQuietLevels = 99;
+const MIC_VOICE_RMS = 655; // int16 rms ≈ -34 dBFS
+const AGENT_VOICE_LEVEL = 0.08; // player level units (rms*4)
 const mobilePersonaQuery = matchMedia("(max-width: 820px)");
 let inactivityNudgeTimer = 0;
 let inactivityDisconnectTimer = 0;
@@ -161,11 +169,16 @@ async function initAudio() {
     mic.port.onmessage = (e) => {
       const pcm = e.data; // Int16Array, 32 ms
       if (!muted && ws?.readyState === WebSocket.OPEN) ws.send(pcm.buffer);
-      // Mic energy feeds the scene's ripples.
+      // Mic energy feeds the scene's ripples and the ear-to-ear stopwatch.
       let sum = 0;
       for (let i = 0; i < pcm.length; i += 4) sum += pcm[i] * pcm[i];
       if (pcm.length) {
-        scene.micLevel(Math.min(1, Math.sqrt(sum / Math.ceil(pcm.length / 4)) / AUDIO_CONFIG.micLevelReference));
+        const rms = Math.sqrt(sum / Math.ceil(pcm.length / 4));
+        scene.micLevel(Math.min(1, rms / AUDIO_CONFIG.micLevelReference));
+        if (!muted && rms > MIC_VOICE_RMS) {
+          lastMicVoiceWall = performance.now();
+          awaitingReply = true;
+        }
       }
     };
   }
@@ -178,6 +191,18 @@ async function initAudio() {
   player.port.onmessage = (e) => {
     if (e.data.level !== undefined) {
       scene.agentLevel(e.data.level);
+      if (e.data.level > AGENT_VOICE_LEVEL) {
+        // ≥3 quiet level ticks (~130ms) separates a reply from the tail of
+        // the previous one.
+        if (agentQuietLevels >= 3 && awaitingReply && lastMicVoiceWall) {
+          awaitingReply = false;
+          els.latency.textContent = `voice → voice ${Math.round(performance.now() - lastMicVoiceWall)} ms`;
+          els.latency.classList.add("show");
+        }
+        agentQuietLevels = 0;
+      } else {
+        agentQuietLevels++;
+      }
       return;
     }
     const wasSpeaking = agentSpeaking;
@@ -273,6 +298,9 @@ function stop() {
   inCtx = outCtx = player = micStream = null;
   agentSpeaking = false;
   userTurnActive = false;
+  lastMicVoiceWall = 0;
+  awaitingReply = false;
+  agentQuietLevels = 99;
   setMuted(false);
   pendingPersona = null;
   els.latency.classList.remove("show");
@@ -371,10 +399,9 @@ function handleEvent(msg) {
       break;
 
     case "metrics":
-      if (msg.total != null) {
-        els.latency.textContent = `voice → voice ${msg.total} ms`;
-        els.latency.classList.add("show");
-      }
+      // Server-side pipeline view (speech end at server -> first byte on the
+      // wire); the pill shows the ear-to-ear measurement instead.
+      console.log("[fish] server pipeline metrics", msg);
       break;
 
     case "error":

@@ -29,6 +29,8 @@ let muted = false;
 let meterCtx = null; // WebAudio context for local level metering
 let meterTimer = 0;
 const meters = { mic: null, agent: null }; // AnalyserNodes
+let lastMicVoiceWall = 0; // last tick the mic carried voice energy
+let awaitingReply = false; // user spoke; next agent audio is "the reply"
 
 let catalog = { personas: [], voices: [] };
 let personaId = "guide";
@@ -110,9 +112,35 @@ function meterTrack(kind, mediaStreamTrack) {
       for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
       return Math.sqrt(sum / buf.length);
     };
+    // Ear-to-ear voice→voice: last tick the mic carried voice energy →
+    // first tick the agent's track makes sound after a quiet gap. Measured
+    // HERE, at the speaker, so it includes STT turn confirmation, both
+    // network legs, and the WebRTC jitter buffer — the number you actually
+    // experience. The agent's own pipeline metrics still land in the
+    // console for debugging.
+    const VOICE_RMS = 0.02; // ≈ -34 dBFS
+    let agentQuietTicks = 99;
     meterTimer = setInterval(() => {
-      scene.micLevel(muted ? 0 : Math.min(1, rms(meters.mic) / 0.18));
-      scene.agentLevel(Math.min(1, rms(meters.agent) * 4));
+      const mic = rms(meters.mic);
+      const agent = rms(meters.agent);
+      scene.micLevel(muted ? 0 : Math.min(1, mic / 0.18));
+      scene.agentLevel(Math.min(1, agent * 4));
+      const now = performance.now();
+      if (!muted && mic > VOICE_RMS) {
+        lastMicVoiceWall = now;
+        awaitingReply = true;
+      }
+      if (agent > VOICE_RMS) {
+        // ≥3 quiet ticks (~135ms) separates a reply from tail of last one.
+        if (agentQuietTicks >= 3 && awaitingReply && lastMicVoiceWall) {
+          awaitingReply = false;
+          els.latency.textContent = `voice → voice ${Math.round(now - lastMicVoiceWall)} ms`;
+          els.latency.classList.add("show");
+        }
+        agentQuietTicks = 0;
+      } else {
+        agentQuietTicks++;
+      }
     }, 45);
   }
 }
@@ -121,6 +149,8 @@ function stopMeters() {
   clearInterval(meterTimer);
   meterTimer = 0;
   meters.mic = meters.agent = null;
+  lastMicVoiceWall = 0;
+  awaitingReply = false;
   meterCtx?.close().catch(() => {});
   meterCtx = null;
 }
@@ -233,10 +263,9 @@ function handleEvent(msg) {
       break;
 
     case "metrics":
-      if (msg.total != null) {
-        els.latency.textContent = `voice → voice ${msg.total} ms`;
-        els.latency.classList.add("show");
-      }
+      // Pipeline-internal view from the agent; the pill shows the ear-to-ear
+      // measurement from the local meters instead (see meterTrack).
+      console.log("[lk] agent pipeline metrics", msg);
       break;
   }
 }

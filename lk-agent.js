@@ -71,6 +71,11 @@ export default defineAgent({
         // This is the same bet fish mode's engine makes, so voice-to-voice
         // numbers stay comparable.
         preemptiveGeneration: { enabled: true, preemptiveTts: true },
+        // Match fish mode's smart barge-in: only proven speech (2+ words)
+        // counts as an interruption. Without this, a breath or stray noise at
+        // turn end pauses the reply and strands it on the false-interruption
+        // timeout — the flat ~2s turns seen in testing (SDK default 2000ms).
+        interruption: { minWords: 2, falseInterruptionTimeout: 1000 },
       },
     });
 
