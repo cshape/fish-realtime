@@ -17,13 +17,15 @@ import * as deepgram from "@livekit/agents-plugin-deepgram";
 import * as fishaudio from "@livekit/agents-plugin-fishaudio";
 import { fileURLToPath } from "node:url";
 import { VOICES, PERSONAS, DEFAULT_PERSONA, lkSystemPromptFor, pickGreeting } from "./personas.js";
-import { INACTIVITY_CONFIG } from "./public/config.js";
+import { INACTIVITY_CONFIG, LLM_CONFIG, LK_AGENT_NAME_DEFAULT } from "./public/config.js";
 
 const STT_MODEL = process.env.LK_STT_MODEL || "flux-general-en";
 const LLM_MODEL = process.env.LK_LLM_MODEL || "google/gemma-4-31b-it";
 // Override for local dev so a dev worker never collides with the deployed
 // agent registered under the production name on the same LiveKit project.
-const AGENT_NAME = process.env.LK_AGENT_NAME || "fish-lk";
+const AGENT_NAME = process.env.LK_AGENT_NAME || LK_AGENT_NAME_DEFAULT;
+
+const encoder = new TextEncoder();
 
 export default defineAgent({
   entry: async (ctx) => {
@@ -49,8 +51,11 @@ export default defineAgent({
       }),
       llm: new inference.LLM({
         model: LLM_MODEL,
-        // Mirrors the fish-mode LLM call params.
-        modelOptions: { temperature: 1.5, max_completion_tokens: 500 },
+        // Same sampling params as fish mode (shared via config.js).
+        modelOptions: {
+          temperature: LLM_CONFIG.temperature,
+          max_completion_tokens: LLM_CONFIG.maxTokens,
+        },
       }),
       // Direct Fish plugin (FISH_API_KEY), not the inference gateway: same
       // crackle-free path as livekit-demo, patched (patches/) with
@@ -81,7 +86,7 @@ export default defineAgent({
 
     const sendData = (obj) => {
       ctx.room.localParticipant
-        ?.publishData(new TextEncoder().encode(JSON.stringify(obj)), { reliable: true })
+        ?.publishData(encoder.encode(JSON.stringify(obj)), { reliable: true })
         .catch(() => {});
     };
 
@@ -115,6 +120,10 @@ export default defineAgent({
       const total = Math.round(ev.createdAt - eou.lastSpeakingTimeMs);
       if (total <= 0 || total > 30_000) return; // stale anchor; don't report junk
       const parts = components[eou.speechId] ?? {};
+      delete components[eou.speechId];
+      // Interrupted/abandoned speeches never reach "speaking", so their
+      // entries would otherwise accumulate for the life of the session.
+      for (const key of Object.keys(components).slice(0, -4)) delete components[key];
       sendData({
         type: "metrics",
         total,

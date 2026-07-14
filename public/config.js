@@ -6,7 +6,32 @@ export const AUDIO_CONFIG = Object.freeze({
   inputSampleRate: 16000,
   outputSampleRate: 24000,
   micLevelReference: 6000,
+  captureConstraints: Object.freeze({
+    echoCancellation: true,
+    noiseSuppression: true,
+    channelCount: 1,
+  }),
 });
+
+// Ear-to-ear voice→voice pill: one gate for both transports so the two pages
+// report comparable numbers. voiceRms is normalized float RMS (≈ -34 dBFS);
+// quietTicks is the run of quiet meter ticks (~130ms) separating a reply from
+// the tail of the previous one.
+export const VOICE_METER = Object.freeze({
+  voiceRms: 0.02,
+  quietTicks: 3,
+});
+
+// LLM sampling params, shared by fish mode (server.js) and /lk (lk-agent.js)
+// so the two pipelines stay comparable.
+export const LLM_CONFIG = Object.freeze({
+  temperature: 1.5,
+  maxTokens: 500,
+});
+
+// Wire contract between /lk-token dispatch (server.js) and the worker
+// registration (lk-agent.js); a mismatch fails silently with agent-less rooms.
+export const LK_AGENT_NAME_DEFAULT = "fish-lk";
 
 export const INACTIVITY_CONFIG = Object.freeze({
   nudgeAfterMs: 10_000,

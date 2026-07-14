@@ -1,24 +1,17 @@
-// LiveKit-mode browser app (/lk). Same UI as app.js, different transport:
-// the browser joins a LiveKit room over WebRTC, the agent (lk-agent.js) is
-// dispatched into it, and UI state + latency metrics arrive as reliable data
-// messages from the agent. Uses the livekit-client UMD bundle (global
-// `LivekitClient`), served at /vendor/livekit-client.umd.js.
+// LiveKit-mode browser app (/lk). Same UI as app.js (via ui-shared.js),
+// different transport: the browser joins a LiveKit room over WebRTC, the
+// agent (lk-agent.js) is dispatched into it, and orb state + pipeline metrics
+// arrive as reliable data messages from the agent. Uses the livekit-client
+// UMD bundle (global `LivekitClient`), served at /vendor/livekit-client.umd.js.
 
-import { createScene } from "/visual.js";
+import { AUDIO_CONFIG } from "/config.js";
+import { createUI, createVoiceMeter } from "/ui-shared.js";
 
 const LK = window.LivekitClient;
-const $ = (id) => document.getElementById(id);
+const decoder = new TextDecoder();
 
-const els = {
-  orb: $("orb"),
-  mute: $("mute"),
-  muteLabel: $("mute-label"),
-  personas: $("personas"),
-  latency: $("latency"),
-};
-
-const scene = createScene($("scene"));
-window.__scene = scene; // console/test access
+const ui = createUI({ onPickPersona: pickPersona });
+const { scene } = ui;
 
 // --- state -------------------------------------------------------------------
 
@@ -29,71 +22,22 @@ let muted = false;
 let meterCtx = null; // WebAudio context for local level metering
 let meterTimer = 0;
 const meters = { mic: null, agent: null }; // AnalyserNodes
-let lastMicVoiceWall = 0; // last tick the mic carried voice energy
-let awaitingReply = false; // user spoke; next agent audio is "the reply"
-
-let catalog = { personas: [], voices: [] };
-let personaId = "guide";
 const mobilePersonaQuery = matchMedia("(max-width: 820px)");
 
-const personaByKey = () => Object.fromEntries(catalog.personas.map((p) => [p.key, p]));
-
-const BOOT = fetch("/catalog.json").then((r) => r.json()).catch(() => null);
-
-// --- ui helpers ----------------------------------------------------------------
-
-function setOrb(state) {
-  els.orb.className = state;
-  els.orb.setAttribute("aria-label", state === "idle" ? "Start talking" : "Stop talking");
-  scene.setState(state);
-}
+// The agent's pipeline metrics still land in the console; the pill shows
+// this ear-to-ear measurement.
+const meter = createVoiceMeter((ms) => ui.showLatency(`voice → voice ${ms} ms`));
 
 function setMuted(next) {
   muted = next;
   room?.localParticipant.setMicrophoneEnabled(!muted).catch(() => {});
-  els.mute.setAttribute("aria-pressed", String(muted));
-  els.mute.setAttribute("aria-label", muted ? "Unmute microphone" : "Mute microphone");
-  els.muteLabel.textContent = muted ? "Unmute" : "Mute";
-  els.mute.classList.toggle("on", muted);
-  if (muted) scene.micLevel(0);
-}
-
-function applyTheme(p) {
-  if (!p?.theme) return;
-  document.documentElement.style.setProperty("--tint", p.theme.tint);
-  document.documentElement.style.setProperty("--glow", p.theme.glow);
-  scene.setTheme(p.theme.tint, p.theme.glow);
-}
-
-function renderPersonas() {
-  els.personas.innerHTML = "";
-  for (const p of catalog.personas) {
-    const b = document.createElement("button");
-    b.className = "persona" + (p.key === personaId ? " on" : "");
-    b.setAttribute("aria-label", `${p.name} — ${p.tagline}`);
-    b.setAttribute("aria-pressed", p.key === personaId ? "true" : "false");
-    b.style.setProperty("--p-tint", p.theme.tint);
-    b.innerHTML = `<span class="p-name">${p.name}</span><span class="p-tag">${p.tagline}</span>`;
-    b.onclick = () => pickPersona(p.key);
-    els.personas.appendChild(b);
-  }
-  requestAnimationFrame(fitPersonaLabels);
-}
-
-function fitPersonaLabels() {
-  for (const label of els.personas.querySelectorAll(".p-name")) {
-    label.style.fontSize = "";
-    if (label.scrollWidth <= label.clientWidth) continue;
-    const naturalSize = Number.parseFloat(getComputedStyle(label).fontSize);
-    const fittedSize = naturalSize * (label.clientWidth / label.scrollWidth) * 0.97;
-    label.style.fontSize = `${Math.max(28, fittedSize).toFixed(2)}px`;
-  }
+  ui.setMuteButton(muted);
 }
 
 // --- level metering ---------------------------------------------------------
-// The scene animation runs off LOCAL WebAudio analysers (~45ms cadence, same
-// feel as the bare agent's worklet metering). LiveKit's ActiveSpeakersChanged
-// is a server round-trip and visibly lags the user's own voice.
+// The scene animation and the ear-to-ear stopwatch run off LOCAL WebAudio
+// analysers (~45ms cadence, same feel as the bare agent's worklet metering).
+// LiveKit's ActiveSpeakersChanged is a server round-trip and visibly lags.
 
 function meterTrack(kind, mediaStreamTrack) {
   if (!mediaStreamTrack) return;
@@ -112,35 +56,13 @@ function meterTrack(kind, mediaStreamTrack) {
       for (let i = 0; i < buf.length; i++) sum += buf[i] * buf[i];
       return Math.sqrt(sum / buf.length);
     };
-    // Ear-to-ear voice→voice: last tick the mic carried voice energy →
-    // first tick the agent's track makes sound after a quiet gap. Measured
-    // HERE, at the speaker, so it includes STT turn confirmation, both
-    // network legs, and the WebRTC jitter buffer — the number you actually
-    // experience. The agent's own pipeline metrics still land in the
-    // console for debugging.
-    const VOICE_RMS = 0.02; // ≈ -34 dBFS
-    let agentQuietTicks = 99;
     meterTimer = setInterval(() => {
       const mic = rms(meters.mic);
       const agent = rms(meters.agent);
       scene.micLevel(muted ? 0 : Math.min(1, mic / 0.18));
       scene.agentLevel(Math.min(1, agent * 4));
-      const now = performance.now();
-      if (!muted && mic > VOICE_RMS) {
-        lastMicVoiceWall = now;
-        awaitingReply = true;
-      }
-      if (agent > VOICE_RMS) {
-        // ≥3 quiet ticks (~135ms) separates a reply from tail of last one.
-        if (agentQuietTicks >= 3 && awaitingReply && lastMicVoiceWall) {
-          awaitingReply = false;
-          els.latency.textContent = `voice → voice ${Math.round(now - lastMicVoiceWall)} ms`;
-          els.latency.classList.add("show");
-        }
-        agentQuietTicks = 0;
-      } else {
-        agentQuietTicks++;
-      }
+      if (!muted) meter.mic(mic);
+      meter.agent(agent);
     }, 45);
   }
 }
@@ -149,17 +71,16 @@ function stopMeters() {
   clearInterval(meterTimer);
   meterTimer = 0;
   meters.mic = meters.agent = null;
-  lastMicVoiceWall = 0;
-  awaitingReply = false;
+  meter.reset();
   meterCtx?.close().catch(() => {});
   meterCtx = null;
 }
 
 function pickPersona(key) {
-  const wasSelected = key === personaId;
-  personaId = key;
-  applyTheme(personaByKey()[key]);
-  renderPersonas();
+  const wasSelected = key === ui.state.personaId;
+  ui.state.personaId = key;
+  ui.applyTheme(ui.personaByKey()[key]);
+  ui.renderPersonas();
   if (running || connecting) {
     // Persona is fixed per LiveKit room; switching means a fresh room.
     stop().then(start);
@@ -174,23 +95,22 @@ function pickPersona(key) {
 async function start() {
   if (running || connecting) return;
   if (!LK) {
-    els.latency.textContent = "livekit-client failed to load";
-    els.latency.classList.add("show");
+    ui.showLatency("livekit-client failed to load");
     return;
   }
   connecting = true;
   setMuted(false);
   document.body.classList.remove("idle");
   document.body.classList.add("session-fullscreen");
-  setOrb("connecting");
+  ui.setOrb("connecting");
 
   try {
-    const res = await fetch(`/lk-token?persona=${encodeURIComponent(personaId)}`);
+    const res = await fetch(`/lk-token?persona=${encodeURIComponent(ui.state.personaId)}`);
     if (!res.ok) throw new Error(`token: ${res.status}`);
     const { url, token } = await res.json();
 
     room = new LK.Room({
-      audioCaptureDefaults: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
+      audioCaptureDefaults: { ...AUDIO_CONFIG.captureConstraints },
     });
 
     room.on(LK.RoomEvent.TrackSubscribed, (track) => {
@@ -203,7 +123,7 @@ async function start() {
 
     room.on(LK.RoomEvent.DataReceived, (payload) => {
       try {
-        handleEvent(JSON.parse(new TextDecoder().decode(payload)));
+        handleEvent(JSON.parse(decoder.decode(payload)));
       } catch {}
     });
 
@@ -222,7 +142,7 @@ async function start() {
 
     connecting = false;
     running = true;
-    setOrb("listening");
+    ui.setOrb("listening");
   } catch (err) {
     console.error("[lk]", err);
     connecting = false;
@@ -244,8 +164,8 @@ async function stop() {
   } catch {}
   for (const el of document.querySelectorAll("audio")) el.remove();
   setMuted(false);
-  els.latency.classList.remove("show");
-  setOrb("idle");
+  ui.hideLatency();
+  ui.setOrb("idle");
   scene.agentLevel(0);
   scene.micLevel(0);
 }
@@ -257,9 +177,9 @@ function handleEvent(msg) {
     case "agent_state":
       if (!running) break;
       // Agent states map 1:1 onto the orb states used by fish mode.
-      if (msg.state === "speaking") setOrb("speaking");
-      else if (msg.state === "thinking") setOrb("thinking");
-      else setOrb("listening");
+      if (msg.state === "speaking") ui.setOrb("speaking");
+      else if (msg.state === "thinking") ui.setOrb("thinking");
+      else ui.setOrb("listening");
       break;
 
     case "metrics":
@@ -272,17 +192,7 @@ function handleEvent(msg) {
 
 // --- wiring ----------------------------------------------------------------------
 
-els.orb.onclick = () => (running || connecting ? stop() : start());
-els.mute.onclick = () => {
-  if (!running) return;
-  setMuted(!muted);
+ui.els.orb.onclick = () => (running || connecting ? stop() : start());
+ui.els.mute.onclick = () => {
+  if (running || connecting) setMuted(!muted);
 };
-addEventListener("resize", () => requestAnimationFrame(fitPersonaLabels));
-
-BOOT.then((data) => {
-  if (!data || catalog.personas.length) return;
-  catalog = data;
-  const first = personaByKey()[personaId];
-  applyTheme(first);
-  renderPersonas();
-});

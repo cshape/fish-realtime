@@ -30,7 +30,7 @@ import { WebSocketServer, WebSocket } from "ws";
 import { AccessToken, RoomConfiguration, RoomAgentDispatch } from "livekit-server-sdk";
 import { VOICES, PERSONAS, DEFAULT_PERSONA, systemPromptFor, publicCatalog, pickGreeting } from "./personas.js";
 import { FishPipeline, TTS_SAMPLE_RATE } from "./tts.js";
-import { AUDIO_CONFIG, INACTIVITY_CONFIG } from "./public/config.js";
+import { AUDIO_CONFIG, INACTIVITY_CONFIG, LLM_CONFIG, LK_AGENT_NAME_DEFAULT } from "./public/config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -233,8 +233,8 @@ async function streamLLM(messages, signal, onDelta) {
       model: LLM_MODEL,
       messages,
       stream: true,
-      temperature: 1.5,
-      max_tokens: 500,
+      temperature: LLM_CONFIG.temperature,
+      max_tokens: LLM_CONFIG.maxTokens,
     }),
   });
   if (!res.ok) {
@@ -834,15 +834,16 @@ async function lkToken(personaParam) {
   at.roomConfig = new RoomConfiguration({
     agents: [
       new RoomAgentDispatch({
-        agentName: process.env.LK_AGENT_NAME || "fish-lk",
+        agentName: process.env.LK_AGENT_NAME || LK_AGENT_NAME_DEFAULT,
         metadata: JSON.stringify({ persona }),
       }),
     ],
   });
-  return { url: process.env.LIVEKIT_URL, token: await at.toJwt(), room, persona };
+  return { url: process.env.LIVEKIT_URL, token: await at.toJwt() };
 }
 
 const LK_CLIENT_PATH = path.join(__dirname, "node_modules/livekit-client/dist/livekit-client.umd.js");
+let lkClientBundle = null; // ~540KB and immutable per deploy: read once, cache
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://x");
@@ -871,10 +872,15 @@ const server = http.createServer((req, res) => {
     return;
   }
   if (url.pathname === "/vendor/livekit-client.umd.js") {
+    const serve = (buf) => {
+      res.writeHead(200, { "Content-Type": MIME[".js"], "Cache-Control": "public, max-age=3600" });
+      res.end(buf);
+    };
+    if (lkClientBundle) return void serve(lkClientBundle);
     fs.readFile(LK_CLIENT_PATH, (err, data) => {
       if (err) return void res.writeHead(404).end("not found");
-      res.writeHead(200, { "Content-Type": MIME[".js"] });
-      res.end(data);
+      lkClientBundle = data;
+      serve(data);
     });
     return;
   }

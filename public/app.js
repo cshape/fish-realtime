@@ -1,22 +1,12 @@
 // fish-realtime browser app: mic -> WS (PCM16 @ 16 kHz), WS -> speaker
-// (PCM16 @ 24 kHz), JSON events for personas/tools, and hooks into
-// the ambient scene (visual.js).
+// (PCM16 @ 24 kHz), JSON events for personas/tools. Shared UI (persona cards,
+// orb, theme, latency pill) lives in ui-shared.js.
 
-import { createScene } from "/visual.js";
 import { AUDIO_CONFIG, INACTIVITY_CONFIG } from "/config.js";
+import { createUI, createVoiceMeter } from "/ui-shared.js";
 
-const $ = (id) => document.getElementById(id);
-
-const els = {
-  orb: $("orb"),
-  mute: $("mute"),
-  muteLabel: $("mute-label"),
-  personas: $("personas"),
-  latency: $("latency"),
-};
-
-const scene = createScene($("scene"));
-window.__scene = scene; // console/test access
+const ui = createUI({ onPickPersona: pickPersona });
+const { els, scene } = ui;
 
 // --- state -------------------------------------------------------------------
 
@@ -29,47 +19,23 @@ let running = false;
 let connecting = false;
 let muted = false;
 
-let catalog = { personas: [], voices: [] };
-let personaId = "guide";
-let voiceId = null;
 let pendingPersona = null; // chosen while idle; applied on start
 let agentSpeaking = false;
 let userTurnActive = false;
-// Ear-to-ear voice→voice measurement (same definition as /lk): last mic chunk
-// with voice energy → first audible playback after a quiet gap, both observed
-// in this tab. The server's pipeline metrics still land in the console.
-let lastMicVoiceWall = 0;
-let awaitingReply = false;
-let agentQuietLevels = 99;
-const MIC_VOICE_RMS = 655; // int16 rms ≈ -34 dBFS
-const AGENT_VOICE_LEVEL = 0.08; // player level units (rms*4)
 const mobilePersonaQuery = matchMedia("(max-width: 820px)");
 let inactivityNudgeTimer = 0;
 let inactivityDisconnectTimer = 0;
 
-const personaByKey = () => Object.fromEntries(catalog.personas.map((p) => [p.key, p]));
-const voiceByKey = () => Object.fromEntries(catalog.voices.map((v) => [v.key, v]));
-
-// Personas are known before the first connection so the idle page can render
-// them; the server's session message is the source of truth once connected.
-const BOOT = fetch("/catalog.json").then((r) => r.json()).catch(() => null);
+// The server's pipeline metrics still land in the console; the pill shows
+// this ear-to-ear measurement.
+const meter = createVoiceMeter((ms) => ui.showLatency(`voice → voice ${ms} ms`));
 
 // --- ui helpers ----------------------------------------------------------------
-
-function setOrb(state) {
-  els.orb.className = state;
-  els.orb.setAttribute("aria-label", state === "idle" ? "Start talking" : "Stop talking");
-  scene.setState(state);
-}
 
 function setMuted(next) {
   muted = next;
   micStream?.getAudioTracks().forEach((track) => { track.enabled = !muted; });
-  els.mute.setAttribute("aria-pressed", String(muted));
-  els.mute.setAttribute("aria-label", muted ? "Unmute microphone" : "Mute microphone");
-  els.muteLabel.textContent = muted ? "Unmute" : "Mute";
-  els.mute.classList.toggle("on", muted);
-  if (muted) scene.micLevel(0);
+  ui.setMuteButton(muted);
 }
 
 function clearInactivityTimers() {
@@ -106,49 +72,15 @@ function resetInactivityTimers() {
   inactivityDisconnectTimer = setTimeout(tryInactivityDisconnect, INACTIVITY_CONFIG.disconnectAfterMs);
 }
 
-function applyTheme(p) {
-  if (!p?.theme) return;
-  document.documentElement.style.setProperty("--tint", p.theme.tint);
-  document.documentElement.style.setProperty("--glow", p.theme.glow);
-  scene.setTheme(p.theme.tint, p.theme.glow);
-}
-
-function renderPersonas() {
-  els.personas.innerHTML = "";
-  for (const p of catalog.personas) {
-    const b = document.createElement("button");
-    b.className = "persona" + (p.key === personaId ? " on" : "");
-    b.setAttribute("aria-label", `${p.name} — ${p.tagline}`);
-    b.setAttribute("aria-pressed", p.key === personaId ? "true" : "false");
-    b.style.setProperty("--p-tint", p.theme.tint);
-    b.innerHTML = `<span class="p-name">${p.name}</span><span class="p-tag">${p.tagline}</span>`;
-    b.onclick = () => pickPersona(p.key);
-    els.personas.appendChild(b);
-  }
-  requestAnimationFrame(fitPersonaLabels);
-}
-
-function fitPersonaLabels() {
-  for (const label of els.personas.querySelectorAll(".p-name")) {
-    // Start from the CSS-defined size on every layout pass, then reduce only
-    // when the unbroken label is wider than its actual card content box.
-    label.style.fontSize = "";
-    if (label.scrollWidth <= label.clientWidth) continue;
-    const naturalSize = Number.parseFloat(getComputedStyle(label).fontSize);
-    const fittedSize = naturalSize * (label.clientWidth / label.scrollWidth) * 0.97;
-    label.style.fontSize = `${Math.max(28, fittedSize).toFixed(2)}px`;
-  }
-}
-
 function pickPersona(key) {
   if (running || connecting) {
-    if (key !== personaId) send({ type: "set_persona", id: key });
+    if (key !== ui.state.personaId) send({ type: "set_persona", id: key });
   } else {
-    const wasSelected = key === personaId;
+    const wasSelected = key === ui.state.personaId;
     pendingPersona = key;
-    personaId = key;
-    applyTheme(personaByKey()[key]);
-    renderPersonas();
+    ui.state.personaId = key;
+    ui.applyTheme(ui.personaByKey()[key]);
+    ui.renderPersonas();
     if (mobilePersonaQuery.matches && !wasSelected) {
       return;
     }
@@ -175,10 +107,7 @@ async function initAudio() {
       if (pcm.length) {
         const rms = Math.sqrt(sum / Math.ceil(pcm.length / 4));
         scene.micLevel(Math.min(1, rms / AUDIO_CONFIG.micLevelReference));
-        if (!muted && rms > MIC_VOICE_RMS) {
-          lastMicVoiceWall = performance.now();
-          awaitingReply = true;
-        }
+        if (!muted) meter.mic(rms / 32768);
       }
     };
   }
@@ -191,24 +120,13 @@ async function initAudio() {
   player.port.onmessage = (e) => {
     if (e.data.level !== undefined) {
       scene.agentLevel(e.data.level);
-      if (e.data.level > AGENT_VOICE_LEVEL) {
-        // ≥3 quiet level ticks (~130ms) separates a reply from the tail of
-        // the previous one.
-        if (agentQuietLevels >= 3 && awaitingReply && lastMicVoiceWall) {
-          awaitingReply = false;
-          els.latency.textContent = `voice → voice ${Math.round(performance.now() - lastMicVoiceWall)} ms`;
-          els.latency.classList.add("show");
-        }
-        agentQuietLevels = 0;
-      } else {
-        agentQuietLevels++;
-      }
+      meter.agent(e.data.level / 4); // level is rms*4 (see player-worklet.js)
       return;
     }
     const wasSpeaking = agentSpeaking;
     agentSpeaking = e.data.playing;
     if (running) {
-      setOrb(agentSpeaking ? "speaking" : "listening");
+      ui.setOrb(agentSpeaking ? "speaking" : "listening");
       // The "still there?" countdown is anchored to agent playback: any
       // pending nudge (or busy-retry poll) is cancelled while audio plays,
       // and the full window starts only once playback stops.
@@ -239,22 +157,21 @@ async function start() {
   setMuted(false);
   document.body.classList.remove("idle");
   document.body.classList.add("session-fullscreen");
-  setOrb("connecting");
+  ui.setOrb("connecting");
   // ?nomic — dev/preview mode: run the session without capture (you hear the
   // agent and can drive personas/voices from the UI, it just can't hear you).
   const noMic = new URLSearchParams(location.search).has("nomic");
   try {
     if (!noMic) {
       micStream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, channelCount: 1 },
+        audio: { ...AUDIO_CONFIG.captureConstraints },
       });
-      setMuted(muted);
     }
   } catch {
     connecting = false;
     document.body.classList.add("idle");
     document.body.classList.remove("session-fullscreen");
-    setOrb("idle");
+    ui.setOrb("idle");
     return;
   }
 
@@ -298,13 +215,11 @@ function stop() {
   inCtx = outCtx = player = micStream = null;
   agentSpeaking = false;
   userTurnActive = false;
-  lastMicVoiceWall = 0;
-  awaitingReply = false;
-  agentQuietLevels = 99;
+  meter.reset();
   setMuted(false);
   pendingPersona = null;
-  els.latency.classList.remove("show");
-  setOrb("idle");
+  ui.hideLatency();
+  ui.setOrb("idle");
   scene.agentLevel(0);
   scene.micLevel(0);
 }
@@ -312,59 +227,46 @@ function stop() {
 function handleEvent(msg) {
   switch (msg.type) {
     case "session":
-      catalog = { personas: msg.personas, voices: msg.voices };
-      personaId = msg.persona;
-      voiceId = msg.voice;
-      renderPersonas();
+      ui.state.catalog = { personas: msg.personas, voices: msg.voices };
+      ui.state.personaId = msg.persona;
+      ui.renderPersonas();
       break;
 
     case "ready": {
       connecting = false;
       running = true;
-      setOrb("listening");
+      ui.setOrb("listening");
       resetInactivityTimers();
       // Greet with the chosen persona (also applies its voice + theme).
-      send({ type: "set_persona", id: pendingPersona ?? personaId });
+      send({ type: "set_persona", id: pendingPersona ?? ui.state.personaId });
       pendingPersona = null;
       break;
     }
 
     case "persona": {
-      personaId = msg.persona;
-      voiceId = msg.voice;
-      const p = personaByKey()[personaId];
-      applyTheme(p);
-      renderPersonas();
+      ui.state.personaId = msg.persona;
+      ui.applyTheme(ui.personaByKey()[msg.persona]);
+      ui.renderPersonas();
       break;
     }
 
-    case "tool": {
+    case "tool":
       if (msg.tool === "change_persona") {
-        personaId = msg.persona;
-        voiceId = msg.voice;
-        applyTheme(personaByKey()[personaId]);
-        renderPersonas();
-      } else if (msg.tool === "change_voice") {
-        voiceId = msg.voice;
+        ui.state.personaId = msg.persona;
+        ui.applyTheme(ui.personaByKey()[msg.persona]);
+        ui.renderPersonas();
       }
       break;
-    }
 
     case "user_start":
       userTurnActive = true;
-      setOrb("listening");
-      break;
-
-    case "user_partial":
+      ui.setOrb("listening");
       break;
 
     case "user_final":
       userTurnActive = false;
-      setOrb("thinking");
+      ui.setOrb("thinking");
       resetInactivityTimers();
-      break;
-
-    case "agent_text":
       break;
 
     case "duck":
@@ -381,9 +283,6 @@ function handleEvent(msg) {
       setDuck(false);
       break;
 
-    case "agent_done":
-      break;
-
     case "inactivity_nudge_deferred":
       if (running && !inactivityNudgeTimer) {
         inactivityNudgeTimer = setTimeout(tryInactivityNudge, INACTIVITY_CONFIG.busyRetryMs);
@@ -391,7 +290,7 @@ function handleEvent(msg) {
       break;
 
     case "inactivity_nudge_started":
-      if (running) setOrb("thinking");
+      if (running) ui.setOrb("thinking");
       break;
 
     case "echo_suppressed":
@@ -404,12 +303,11 @@ function handleEvent(msg) {
       console.log("[fish] server pipeline metrics", msg);
       break;
 
-    case "error":
-      break;
-
     case "stt_closed":
       if (running) stop();
       break;
+
+    // user_partial / agent_text / agent_done / error: intentionally ignored.
   }
 }
 
@@ -419,18 +317,3 @@ els.orb.onclick = () => (running || connecting ? stop() : start());
 els.mute.onclick = () => {
   if (running || connecting) setMuted(!muted);
 };
-let personaFitFrame = 0;
-addEventListener("resize", () => {
-  cancelAnimationFrame(personaFitFrame);
-  personaFitFrame = requestAnimationFrame(fitPersonaLabels);
-});
-
-// Idle boot: render personas from the static catalog so the page is alive
-// before any connection.
-BOOT.then((data) => {
-  if (!data || catalog.personas.length) return;
-  catalog = data;
-  const first = personaByKey()[personaId];
-  applyTheme(first);
-  renderPersonas();
-});
