@@ -206,6 +206,17 @@ export function systemPromptFor(personaKey) {
   return `${p.prompt} ${SPOKEN_STYLE}${TOOL_RULES}`;
 }
 
+// LiveKit mode has no inline-directive filter, so its prompt omits TOOL_RULES.
+export function lkSystemPromptFor(personaKey) {
+  const p = PERSONAS[personaKey] ?? PERSONAS[DEFAULT_PERSONA];
+  return `${p.prompt} ${SPOKEN_STYLE}`;
+}
+
+export function pickGreeting(personaKey) {
+  const p = PERSONAS[personaKey] ?? PERSONAS[DEFAULT_PERSONA];
+  return p.greetings[Math.floor(Math.random() * p.greetings.length)];
+}
+
 // What the browser needs to render pickers and themes (no prompts).
 export function publicCatalog() {
   return {

@@ -62,3 +62,26 @@ Voices are Fish reference IDs in `personas.js` — edit the catalog to recast.
 - Phone testing needs an HTTPS origin for the mic (e.g. `ngrok http 8787`).
 - The browser throttles the continuously scheduled scene in hidden tabs; under
   `prefers-reduced-motion` it falls back to a static wash.
+
+## LiveKit mode (`/lk`)
+
+The same demo served over WebRTC via [LiveKit Agents](https://docs.livekit.io/agents/),
+with every model running through LiveKit Inference — no Deepgram/LLM keys needed
+for this mode:
+
+- STT `deepgram/flux-general-en` (same EOT settings as fish mode)
+- LLM `google/gemma-4-31b-it`
+- TTS `fishaudio/s2.1-pro` with the same voice reference ids from `personas.js`
+
+Set `LIVEKIT_URL`, `LIVEKIT_API_KEY`, and `LIVEKIT_API_SECRET`; `server.js`
+then spawns the agent worker (`lk-agent.js`) alongside itself and `/lk` goes
+live. Persona is chosen at join (dispatch metadata); switching personas
+mid-session starts a fresh room.
+
+Latency parity: fish mode reports voice→voice as last-audible-mic-chunk →
+first-audio-on-the-wire, measured in `server.js`. LiveKit mode reports the
+matching span — `EOUMetrics.lastSpeakingTimeMs` → the agent-state transition
+to `speaking` (first audio published to the room) — measured in `lk-agent.js`
+and delivered to the same latency pill over the room's data channel. Both
+spans include STT finalization, LLM TTFT, and TTS TTFB, and both exclude the
+final downstream hop to the browser.

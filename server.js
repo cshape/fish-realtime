@@ -23,10 +23,12 @@
 import http from "node:http";
 import fs from "node:fs";
 import path from "node:path";
+import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
-import { VOICES, PERSONAS, DEFAULT_PERSONA, systemPromptFor, publicCatalog } from "./personas.js";
+import { AccessToken, RoomConfiguration, RoomAgentDispatch } from "livekit-server-sdk";
+import { VOICES, PERSONAS, DEFAULT_PERSONA, systemPromptFor, publicCatalog, pickGreeting } from "./personas.js";
 import { FishPipeline, TTS_SAMPLE_RATE } from "./tts.js";
 import { AUDIO_CONFIG, INACTIVITY_CONFIG } from "./public/config.js";
 
@@ -328,7 +330,7 @@ class Session {
     if (greet) {
       if (this.turn) this.#cancelTurn();
       this.sendClear();
-      this.#startSpokenLine(p.greetings[Math.floor(Math.random() * p.greetings.length)]);
+      this.#startSpokenLine(pickGreeting(id));
     }
   }
 
@@ -815,6 +817,28 @@ const MIME = {
 
 const sessions = new Map(); // sid -> Session
 
+// LiveKit mode (/lk): the browser joins a LiveKit room and an agent worker
+// (lk-agent.js, spawned below) is dispatched into it.
+const LK_ENABLED = Boolean(
+  process.env.LIVEKIT_URL && process.env.LIVEKIT_API_KEY && process.env.LIVEKIT_API_SECRET,
+);
+
+async function lkToken(personaParam) {
+  const persona = PERSONAS[personaParam] ? personaParam : DEFAULT_PERSONA;
+  const room = `lk-${randomUUID().slice(0, 8)}`;
+  const at = new AccessToken(process.env.LIVEKIT_API_KEY, process.env.LIVEKIT_API_SECRET, {
+    identity: `user-${randomUUID().slice(0, 8)}`,
+    ttl: "1h",
+  });
+  at.addGrant({ roomJoin: true, room, canPublish: true, canSubscribe: true, canPublishData: true });
+  at.roomConfig = new RoomConfiguration({
+    agents: [new RoomAgentDispatch({ agentName: "fish-lk", metadata: JSON.stringify({ persona }) })],
+  });
+  return { url: process.env.LIVEKIT_URL, token: await at.toJwt(), room, persona };
+}
+
+const LK_CLIENT_PATH = path.join(__dirname, "node_modules/livekit-client/dist/livekit-client.umd.js");
+
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://x");
   if (url.pathname === "/catalog.json") {
@@ -823,7 +847,34 @@ const server = http.createServer((req, res) => {
     res.end(JSON.stringify({ persona: DEFAULT_PERSONA, ...publicCatalog() }));
     return;
   }
+  if (url.pathname === "/lk-token") {
+    if (!LK_ENABLED) {
+      res.writeHead(503, { "Content-Type": "application/json" });
+      res.end(JSON.stringify({ error: "LiveKit mode is not configured (LIVEKIT_* env vars)" }));
+      return;
+    }
+    lkToken(url.searchParams.get("persona")).then(
+      (body) => {
+        res.writeHead(200, { "Content-Type": "application/json" });
+        res.end(JSON.stringify(body));
+      },
+      (err) => {
+        console.error("[lk-token]", err);
+        res.writeHead(500).end();
+      },
+    );
+    return;
+  }
+  if (url.pathname === "/vendor/livekit-client.umd.js") {
+    fs.readFile(LK_CLIENT_PATH, (err, data) => {
+      if (err) return void res.writeHead(404).end("not found");
+      res.writeHead(200, { "Content-Type": MIME[".js"] });
+      res.end(data);
+    });
+    return;
+  }
   let file = url.pathname === "/" ? "/index.html" : url.pathname;
+  if (url.pathname === "/lk") file = "/lk.html";
   file = path.normalize(file).replace(/^(\.\.[/\\])+/, "");
   const full = path.join(__dirname, "public", file);
   if (!full.startsWith(path.join(__dirname, "public"))) {
@@ -895,4 +946,22 @@ server.listen(PORT, () => {
   console.log(`  llm:  ${LLM_MODEL} @ ${LLM_BASE_URL}`);
   console.log(`  tts:  fish ${FISH_MODEL} latency=${FISH_LATENCY_MODE}`);
   console.log(`  personas: ${Object.keys(PERSONAS).join(", ")} | voices: ${Object.keys(VOICES).join(", ")}`);
+  console.log(`  livekit mode (/lk): ${LK_ENABLED ? "enabled" : "disabled (set LIVEKIT_* env vars)"}`);
 });
+
+// The LiveKit agent worker rides along in the same service: one deployable
+// unit on Render, one `node server.js` locally.
+if (LK_ENABLED && !process.env.LK_AGENT_DISABLED) {
+  const spawnLkAgent = () => {
+    const child = spawn(process.execPath, [path.join(__dirname, "lk-agent.js"), "start"], {
+      stdio: "inherit",
+      env: process.env,
+    });
+    child.on("exit", (code) => {
+      console.error(`[lk-agent] worker exited (code ${code}); restarting in 5s`);
+      setTimeout(spawnLkAgent, 5000).unref();
+    });
+    process.on("exit", () => child.kill());
+  };
+  spawnLkAgent();
+}
