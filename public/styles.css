@@ -336,7 +336,6 @@ body.idle .persona::before {
 
 body.idle .persona:hover,
 body.idle .persona.on {
-  transform: translateY(-2px);
   border-color: color-mix(in srgb, var(--p-tint, var(--tint)) 42%, white);
   background:
     radial-gradient(circle at 82% 18%, color-mix(in srgb, var(--p-tint, var(--tint)) 34%, transparent), transparent 36%),
@@ -345,6 +344,12 @@ body.idle .persona.on {
   box-shadow:
     0 34px 86px -58px var(--p-tint, var(--tint)),
     0 1px 0 rgba(255, 255, 255, 0.82) inset;
+}
+
+/* The lift is hover feedback only — the selected card gets the highlight
+   above at rest, so it still visibly responds when hovered. */
+body.idle .persona:hover {
+  transform: translateY(-2px);
 }
 
 body.idle .persona .p-name {
