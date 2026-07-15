@@ -5,13 +5,17 @@
 // UMD bundle (global `LivekitClient`), served at /vendor/livekit-client.umd.js.
 
 import { AUDIO_CONFIG } from "/config.js";
-import { createUI, createVoiceMeter } from "/ui-shared.js";
+import { createUI, mobilePersonaQuery } from "/ui-shared.js";
 
 const LK = window.LivekitClient;
 const decoder = new TextDecoder();
 
 const ui = createUI({ onPickPersona: pickPersona });
-const { scene } = ui;
+const { scene, meter } = ui;
+
+// AUDIO_CONFIG.micLevelReference is in int16 rms units; the analysers here
+// produce float rms.
+const MIC_LEVEL_REF = AUDIO_CONFIG.micLevelReference / 32768;
 
 // --- state -------------------------------------------------------------------
 
@@ -22,11 +26,6 @@ let muted = false;
 let meterCtx = null; // WebAudio context for local level metering
 let meterTimer = 0;
 const meters = { mic: null, agent: null }; // AnalyserNodes
-const mobilePersonaQuery = matchMedia("(max-width: 820px)");
-
-// The agent's pipeline metrics still land in the console; the pill shows
-// this ear-to-ear measurement.
-const meter = createVoiceMeter((ms) => ui.showLatency(`voice → voice ${ms} ms`));
 
 function setMuted(next) {
   muted = next;
@@ -59,7 +58,7 @@ function meterTrack(kind, mediaStreamTrack) {
     meterTimer = setInterval(() => {
       const mic = rms(meters.mic);
       const agent = rms(meters.agent);
-      scene.micLevel(muted ? 0 : Math.min(1, mic / 0.18));
+      scene.micLevel(muted ? 0 : Math.min(1, mic / MIC_LEVEL_REF));
       scene.agentLevel(Math.min(1, agent * 4));
       if (!muted) meter.mic(mic);
       meter.agent(agent);
@@ -78,9 +77,7 @@ function stopMeters() {
 
 function pickPersona(key) {
   const wasSelected = key === ui.state.personaId;
-  ui.state.personaId = key;
-  ui.applyTheme(ui.personaByKey()[key]);
-  ui.renderPersonas();
+  ui.setActivePersona(key);
   if (running || connecting) {
     // Persona is fixed per LiveKit room; switching means a fresh room.
     stop().then(start);
@@ -100,9 +97,7 @@ async function start() {
   }
   connecting = true;
   setMuted(false);
-  document.body.classList.remove("idle");
-  document.body.classList.add("session-fullscreen");
-  ui.setOrb("connecting");
+  ui.enterSession();
 
   try {
     const res = await fetch(`/lk-token?persona=${encodeURIComponent(ui.state.personaId)}`);
@@ -154,8 +149,6 @@ async function stop() {
   if (!running && !connecting) return;
   running = false;
   connecting = false;
-  document.body.classList.add("idle");
-  document.body.classList.remove("session-fullscreen");
   const r = room;
   room = null;
   stopMeters();
@@ -164,10 +157,7 @@ async function stop() {
   } catch {}
   for (const el of document.querySelectorAll("audio")) el.remove();
   setMuted(false);
-  ui.hideLatency();
-  ui.setOrb("idle");
-  scene.agentLevel(0);
-  scene.micLevel(0);
+  ui.leaveSession();
 }
 
 // --- agent data messages -------------------------------------------------------

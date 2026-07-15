@@ -12,7 +12,7 @@ browser mic ── PCM16 @16k ──> server ──> Deepgram Flux    (STT + tur
                                 │         Gemma            (OpenAI-compatible, streamed)
                                 │            │ tokens ─> sentence chunker
                                 │            v
-browser spk <── PCM16 @24k ── server <── Fish TTS         (/v1/tts/live, one WS per voice segment)
+browser spk <── PCM16 @24k ── server <── Fish TTS         (/v1/tts/live, one WS per turn)
 ```
 
 ## The product surface

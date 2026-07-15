@@ -6,7 +6,7 @@
 //        plus EagerEndOfTurn for speculative generation)
 //     -> Gemma LLM (OpenAI-compatible /chat/completions, streamed SSE)
 //     -> sentence chunker
-//     -> Fish TTS websocket(s) (/v1/tts/live, msgpack — one per voice segment)
+//     -> Fish TTS websocket (/v1/tts/live, msgpack)
 //     -> browser (PCM16 @ 24 kHz, binary WS frames)
 //
 // Latency strategy: when Flux says "the user is probably done" (EagerEndOfTurn)
@@ -28,7 +28,7 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import { AccessToken, RoomConfiguration, RoomAgentDispatch } from "livekit-server-sdk";
 import { VOICES, PERSONAS, DEFAULT_PERSONA, systemPromptFor, publicCatalog, pickGreeting } from "./personas.js";
-import { FishPipeline, TTS_SAMPLE_RATE } from "./tts.js";
+import { FishPipeline, TTS_SAMPLE_RATE, FISH_MODEL, FISH_LATENCY_MODE } from "./tts.js";
 import { AUDIO_CONFIG, INACTIVITY_CONFIG, LLM_CONFIG, LK_AGENT_NAME_DEFAULT } from "./public/config.js";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -53,8 +53,6 @@ const LLM_API_KEY = required("LLM_API_KEY");
 const LLM_MODEL = process.env.LLM_MODEL || "google/gemma-4-26B-A4B-it";
 
 required("FISH_API_KEY"); // consumed by tts.js
-const FISH_MODEL = process.env.FISH_MODEL || "s2.1-pro";
-const FISH_LATENCY_MODE = process.env.FISH_LATENCY_MODE || "balanced"; // normal | balanced | low
 
 const MIC_SAMPLE_RATE = AUDIO_CONFIG.inputSampleRate; // browser -> Deepgram; TTS_SAMPLE_RATE from tts.js
 
@@ -201,11 +199,6 @@ async function streamLLM(messages, signal, onDelta) {
 }
 
 // ---------------------------------------------------------------------------
-// Fish TTS — openFishSocket + FishPipeline live in tts.js (imported above) so
-// scripts/ can exercise the voice-morph pipeline without the server.
-// ---------------------------------------------------------------------------
-
-// ---------------------------------------------------------------------------
 // Session — one per browser websocket. Owns the Deepgram connection, the
 // conversation history, the current persona/voice, and at most one in-flight
 // agent turn (which may be speculative, i.e. started on EagerEndOfTurn and
@@ -220,7 +213,6 @@ class Session {
     this.turn = null;
     this.turnCounter = 0;
     this.personaId = DEFAULT_PERSONA;
-    this.voiceId = PERSONAS[DEFAULT_PERSONA].voice; // voice catalog key
     // Wall time of the last mic chunk with speech-level energy. Flux's
     // TurnInfo events have no word timings (audio_window_end just tracks how
     // much audio it has processed, silence included), so this energy gate is
@@ -233,6 +225,7 @@ class Session {
     //                         >= minWords).
     //   echoFilter drop user turns whose transcript matches what the agent
     //              was just saying.
+    // Fixed policy — nothing tunes this at runtime.
     this.cfg = { bargeMode: "smart", echoFilter: true, minWords: 2 };
     // Playback horizon: wall time when the client's speaker goes quiet if we
     // send nothing more. Audio is played in real time, so shipped-bytes fully
@@ -244,30 +237,15 @@ class Session {
     this.dg = this.#connectDeepgram();
   }
 
-  applyConfig(cfg) {
-    if (cfg.bargeMode === "instant" || cfg.bargeMode === "smart") this.cfg.bargeMode = cfg.bargeMode;
-    if (typeof cfg.echoFilter === "boolean") this.cfg.echoFilter = cfg.echoFilter;
-    if ([1, 2, 3].includes(cfg.minWords)) this.cfg.minWords = cfg.minWords;
-    console.log(`[session] ${this.sid} config:`, this.cfg);
-  }
-
-  fishVoiceRef() {
-    return VOICES[this.voiceId]?.id ?? null;
-  }
-
-  // Switch persona (from the UI). Keeps conversation history —
-  // the new persona knows what was said — but swaps prompt, voice, and theme.
-  setPersona(id, { greet } = {}) {
-    const p = PERSONAS[id];
-    if (!p || (id === this.personaId && !greet)) return;
+  // Switch persona (from the UI). Keeps conversation history — the new
+  // persona knows what was said — but swaps prompt and voice, and greets.
+  setPersona(id) {
+    if (!PERSONAS[id]) return;
     this.personaId = id;
-    this.voiceId = p.voice;
-    this.sendJson({ type: "persona", persona: id, voice: this.voiceId });
-    if (greet) {
-      if (this.turn) this.#cancelTurn();
-      this.sendClear();
-      this.#startSpokenLine(pickGreeting(id));
-    }
+    this.sendJson({ type: "persona", persona: id });
+    if (this.turn) this.#cancelTurn();
+    this.sendClear();
+    this.#startSpokenLine(pickGreeting(id));
   }
 
   triggerInactivityNudge() {
@@ -416,7 +394,6 @@ class Session {
       case "Update":
         if (!transcript) break;
         this.#maybeConfirmBarge(transcript);
-        this.sendJson({ type: "user_partial", text: transcript });
         break;
 
       case "EagerEndOfTurn":
@@ -562,7 +539,7 @@ class Session {
   }
 
   #openTurnPipeline(turn) {
-    return new FishPipeline(this.fishVoiceRef(), {
+    return new FishPipeline(VOICES[PERSONAS[this.personaId].voice], {
       onAudio: (buf) => {
         if (this.turn?.id !== turn.id) return;
         if (turn.firstAudioWall === 0) turn.firstAudioWall = Date.now();
@@ -598,7 +575,6 @@ class Session {
     turn.inHistory = true; // recorded below, not by the LLM path
     this.turn = turn;
     turn.fish = this.#openTurnPipeline(turn);
-    this.#deliver(turn, "json", { type: "agent_text", text });
     turn.spoken = text;
     turn.fish.pushText(text);
     turn.fish.endInput();
@@ -627,7 +603,6 @@ class Session {
     const onText = (text) => {
       if (!text) return;
       full += text;
-      this.#deliver(turn, "json", { type: "agent_text", text });
       for (const sentence of chunker.push(text)) pushToFish(sentence);
     };
 
@@ -790,13 +765,11 @@ server.on("upgrade", (req, socket, head) => {
   }
   wss.handleUpgrade(req, socket, head, (client) => {
     const session = new Session(client);
-    sessions.set(session.sid, session);
     console.log(`[session] ${session.sid} connected`);
     session.sendJson({
       type: "session",
       sid: session.sid,
       persona: session.personaId,
-      voice: session.voiceId,
       ...publicCatalog(),
     });
     client.on("message", (data, isBinary) => {
@@ -806,10 +779,8 @@ server.on("upgrade", (req, socket, head) => {
       }
       try {
         const msg = JSON.parse(data.toString());
-        if (msg.type === "config") {
-          session.applyConfig(msg);
-        } else if (msg.type === "set_persona") {
-          session.setPersona(msg.id, { greet: msg.greet !== false });
+        if (msg.type === "set_persona") {
+          session.setPersona(msg.id);
         } else if (msg.type === "inactivity_nudge") {
           session.triggerInactivityNudge();
         }
@@ -817,13 +788,9 @@ server.on("upgrade", (req, socket, head) => {
     });
     client.on("close", () => {
       console.log(`[session] ${session.sid} closed`);
-      sessions.delete(session.sid);
       session.destroy();
     });
-    client.on("error", () => {
-      sessions.delete(session.sid);
-      session.destroy();
-    });
+    client.on("error", () => session.destroy());
   });
 });
 

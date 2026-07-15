@@ -133,7 +133,7 @@ ws.on("message", (data, isBinary) => {
       console.log(`[smoke] transcript ${finals.length}: "${msg.text}"`);
       break;
     case "persona":
-      console.log(`[smoke] persona event: persona=${msg.persona} voice=${msg.voice}`);
+      console.log(`[smoke] persona event: persona=${msg.persona}`);
       break;
     case "clear":
       if (bargedIn) clears++;

@@ -1,12 +1,12 @@
 // fish-realtime browser app: mic -> WS (PCM16 @ 16 kHz), WS -> speaker
-// (PCM16 @ 24 kHz), JSON events for personas/tools. Shared UI (persona cards,
-// orb, theme, latency pill) lives in ui-shared.js.
+// (PCM16 @ 24 kHz), JSON events for personas. Shared UI (persona cards,
+// orb, theme, latency pill, voice meter) lives in ui-shared.js.
 
 import { AUDIO_CONFIG, INACTIVITY_CONFIG } from "/config.js";
-import { createUI, createVoiceMeter } from "/ui-shared.js";
+import { createUI, mobilePersonaQuery } from "/ui-shared.js";
 
 const ui = createUI({ onPickPersona: pickPersona });
-const { els, scene } = ui;
+const { els, scene, meter } = ui;
 
 // --- state -------------------------------------------------------------------
 
@@ -22,13 +22,8 @@ let muted = false;
 let pendingPersona = null; // chosen while idle; applied on start
 let agentSpeaking = false;
 let userTurnActive = false;
-const mobilePersonaQuery = matchMedia("(max-width: 820px)");
 let inactivityNudgeTimer = 0;
 let inactivityDisconnectTimer = 0;
-
-// The server's pipeline metrics still land in the console; the pill shows
-// this ear-to-ear measurement.
-const meter = createVoiceMeter((ms) => ui.showLatency(`voice → voice ${ms} ms`));
 
 // --- ui helpers ----------------------------------------------------------------
 
@@ -78,9 +73,7 @@ function pickPersona(key) {
   } else {
     const wasSelected = key === ui.state.personaId;
     pendingPersona = key;
-    ui.state.personaId = key;
-    ui.applyTheme(ui.personaByKey()[key]);
-    ui.renderPersonas();
+    ui.setActivePersona(key);
     if (mobilePersonaQuery.matches && !wasSelected) {
       return;
     }
@@ -155,11 +148,9 @@ async function start() {
   if (running || connecting) return;
   connecting = true;
   setMuted(false);
-  document.body.classList.remove("idle");
-  document.body.classList.add("session-fullscreen");
-  ui.setOrb("connecting");
+  ui.enterSession();
   // ?nomic — dev/preview mode: run the session without capture (you hear the
-  // agent and can drive personas/voices from the UI, it just can't hear you).
+  // agent and can drive personas from the UI, it just can't hear you).
   const noMic = new URLSearchParams(location.search).has("nomic");
   try {
     if (!noMic) {
@@ -169,9 +160,7 @@ async function start() {
     }
   } catch {
     connecting = false;
-    document.body.classList.add("idle");
-    document.body.classList.remove("session-fullscreen");
-    ui.setOrb("idle");
+    ui.leaveSession();
     return;
   }
 
@@ -191,7 +180,7 @@ async function start() {
   ws.binaryType = "arraybuffer";
   ws.onmessage = (e) => {
     if (e.data instanceof ArrayBuffer) {
-      player?.port.postMessage(new Int16Array(e.data));
+      player?.port.postMessage(new Int16Array(e.data), [e.data]);
       return;
     }
     handleEvent(JSON.parse(e.data));
@@ -205,8 +194,6 @@ function stop() {
   clearInactivityTimers();
   running = false;
   connecting = false;
-  document.body.classList.add("idle");
-  document.body.classList.remove("session-fullscreen");
   ws?.close();
   ws = null;
   micStream?.getTracks().forEach((t) => t.stop());
@@ -215,13 +202,9 @@ function stop() {
   inCtx = outCtx = player = micStream = null;
   agentSpeaking = false;
   userTurnActive = false;
-  meter.reset();
   setMuted(false);
   pendingPersona = null;
-  ui.hideLatency();
-  ui.setOrb("idle");
-  scene.agentLevel(0);
-  scene.micLevel(0);
+  ui.leaveSession();
 }
 
 function handleEvent(msg) {
@@ -243,12 +226,9 @@ function handleEvent(msg) {
       break;
     }
 
-    case "persona": {
-      ui.state.personaId = msg.persona;
-      ui.applyTheme(ui.personaByKey()[msg.persona]);
-      ui.renderPersonas();
+    case "persona":
+      ui.setActivePersona(msg.persona);
       break;
-    }
 
     case "user_start":
       userTurnActive = true;
@@ -299,7 +279,7 @@ function handleEvent(msg) {
       if (running) stop();
       break;
 
-    // user_partial / agent_text / agent_done / error: intentionally ignored.
+    // agent_done / error: intentionally ignored.
   }
 }
 

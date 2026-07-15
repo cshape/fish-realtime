@@ -2,11 +2,12 @@
 // a market segment (companions, accessible content, customer service) and
 // speaks with its own fixed Fish voice.
 
+// Fish voice reference ids, one per persona voice name.
 export const VOICES = {
-  marlowe: { key: "marlowe", id: "4501d82f5de3467ebf4d7ef095a2deee" },
-  sienna: { key: "sienna", id: "ca3007f96ae7499ab87d27ea3599956a" },
-  alistair: { key: "alistair", id: "9a3a69c63dbc4774ac41b03945229dc8" },
-  maeve: { key: "maeve", id: "41db1fc3c3624332bec9997ff3d3d353" },
+  marlowe: "4501d82f5de3467ebf4d7ef095a2deee",
+  sienna: "ca3007f96ae7499ab87d27ea3599956a",
+  alistair: "9a3a69c63dbc4774ac41b03945229dc8",
+  maeve: "41db1fc3c3624332bec9997ff3d3d353",
 };
 
 // Spoken-aloud ground rules shared by every persona.
@@ -122,8 +123,8 @@ export function pickGreeting(personaKey) {
 // What the browser needs to render pickers and themes (no prompts).
 export function publicCatalog() {
   return {
-    personas: Object.values(PERSONAS).map(({ key, name, tagline, voice, theme }) => ({
-      key, name, tagline, voice, theme,
+    personas: Object.values(PERSONAS).map(({ key, name, tagline, theme }) => ({
+      key, name, tagline, theme,
     })),
   };
 }

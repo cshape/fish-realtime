@@ -35,7 +35,7 @@ export default defineAgent({
       if (PERSONAS[meta.persona]) personaId = meta.persona;
     } catch {}
     const persona = PERSONAS[personaId];
-    const voiceRef = VOICES[persona.voice].id;
+    const voiceRef = VOICES[persona.voice];
 
     const session = new voice.AgentSession({
       // Direct Deepgram Flux over /v2/listen (DEEPGRAM_API_KEY), skipping the

@@ -7,7 +7,11 @@
 import { createScene } from "/visual.js";
 import { VOICE_METER } from "/config.js";
 
-export const $ = (id) => document.getElementById(id);
+const $ = (id) => document.getElementById(id);
+
+// Personas collapse to a single tap-to-start column below this width; must
+// match the breakpoint in styles.css.
+export const mobilePersonaQuery = matchMedia("(max-width: 820px)");
 
 export function createUI({ onPickPersona }) {
   const els = {
@@ -88,6 +92,31 @@ export function createUI({ onPickPersona }) {
     els.latency.classList.remove("show");
   }
 
+  // The ear-to-ear stopwatch feeds the pill; transports feed the stopwatch.
+  const meter = createVoiceMeter((ms) => showLatency(`voice → voice ${ms} ms`));
+
+  function setActivePersona(key) {
+    state.personaId = key;
+    applyTheme(personaByKey()[key]);
+    renderPersonas();
+  }
+
+  function enterSession() {
+    document.body.classList.remove("idle");
+    document.body.classList.add("session-fullscreen");
+    setOrb("connecting");
+  }
+
+  function leaveSession() {
+    document.body.classList.add("idle");
+    document.body.classList.remove("session-fullscreen");
+    meter.reset();
+    hideLatency();
+    setOrb("idle");
+    scene.agentLevel(0);
+    scene.micLevel(0);
+  }
+
   let personaFitFrame = 0;
   addEventListener("resize", () => {
     cancelAnimationFrame(personaFitFrame);
@@ -101,8 +130,8 @@ export function createUI({ onPickPersona }) {
     .then((data) => {
       if (!data || state.catalog.personas.length) return;
       state.catalog = data;
-      applyTheme(personaByKey()[state.personaId]);
-      renderPersonas();
+      // The server owns the default persona.
+      setActivePersona(data.persona ?? state.personaId);
     })
     .catch(() => {});
 
@@ -110,10 +139,14 @@ export function createUI({ onPickPersona }) {
     els,
     scene,
     state,
+    meter,
     personaByKey,
     setOrb,
     applyTheme,
     renderPersonas,
+    setActivePersona,
+    enterSession,
+    leaveSession,
     setMuteButton,
     showLatency,
     hideLatency,

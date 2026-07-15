@@ -1,21 +1,21 @@
 // Fish TTS — /v1/tts/live websocket. Text goes in as sentence chunks, PCM16
-// comes out via onAudio. One socket speaks with ONE voice; mid-turn voice
-// changes are handled by FishPipeline, which chains sockets.
+// comes out via onAudio. One socket per agent turn, one voice per turn.
 //
-// Extracted from server.js so scripts/ can exercise the pipeline directly.
+// Extracted from server.js so the pipeline can be exercised without it.
 
 import { WebSocket } from "ws";
 import { encode as mpEncode, decode as mpDecode } from "@msgpack/msgpack";
+import { AUDIO_CONFIG } from "./public/config.js";
 
 const FISH_API_KEY = process.env.FISH_API_KEY;
-const FISH_MODEL = process.env.FISH_MODEL || "s2.1-pro";
-const FISH_LATENCY_MODE = process.env.FISH_LATENCY_MODE || "balanced"; // normal | balanced | low
-export const TTS_SAMPLE_RATE = 24000;
+export const FISH_MODEL = process.env.FISH_MODEL || "s2.1-pro";
+export const FISH_LATENCY_MODE = process.env.FISH_LATENCY_MODE || "balanced"; // normal | balanced | low
+export const TTS_SAMPLE_RATE = AUDIO_CONFIG.outputSampleRate;
 
 const DEBUG = !!process.env.FISH_DEBUG;
 const dbg = (...args) => DEBUG && console.log("[fish:dbg]", ...args);
 
-export function openFishSocket(referenceId, { onAudio, onFinish, onError }) {
+function openFishSocket(referenceId, { onAudio, onFinish, onError }) {
   const ws = new WebSocket("wss://api.fish.audio/v1/tts/live", {
     headers: {
       Authorization: `Bearer ${FISH_API_KEY}`,
@@ -67,7 +67,8 @@ export function openFishSocket(referenceId, { onAudio, onFinish, onError }) {
       return;
     }
     if (msg.event === "audio" && msg.audio?.length) {
-      onAudio(Buffer.from(msg.audio));
+      const a = msg.audio; // Uint8Array view over the WS frame; never reused
+      onAudio(Buffer.from(a.buffer, a.byteOffset, a.byteLength));
     } else if (msg.event === "finish") {
       closed = true;
       ws.close();
@@ -101,118 +102,59 @@ export function openFishSocket(referenceId, { onAudio, onFinish, onError }) {
   };
 }
 
-// One agent turn's TTS, possibly spanning several voices. Each setVoice()
-// seals the current Fish socket and opens the next one with the new voice;
-// later segments synthesize concurrently but their audio is buffered until
-// every earlier segment finishes, so playback order is preserved.
+// One agent turn's TTS. Thin wrapper over the socket that adds the two
+// behaviors the raw stream can't express:
+//  - whitespace-only input never reaches Fish (a stream sealed with nothing
+//    but whitespace makes Fish finish with reason=error), and
+//  - a turn whose text was all whitespace still fires onFinish.
 export class FishPipeline {
-  #segments = []; // { handle, buffered: [Buffer], gotText, finished, bytes }
+  #handle;
   #cb;
-  #ended = false;
+  #gotText = false;
   #closed = false;
 
   constructor(referenceId, callbacks) {
     this.#cb = callbacks;
-    this.#openSegment(referenceId);
-  }
-
-  #openSegment(referenceId) {
-    const seg = { handle: null, buffered: [], gotText: false, finished: false, bytes: 0 };
-    const idx = this.#segments.push(seg) - 1;
-    dbg(`seg${idx} open voice=${referenceId?.slice(0, 8)}`);
-    seg.handle = openFishSocket(referenceId, {
+    this.#handle = openFishSocket(referenceId, {
       onAudio: (buf) => {
-        if (this.#closed) return;
-        seg.bytes += buf.length;
-        if (idx === this.#frontier()) this.#cb.onAudio(buf);
-        else {
-          seg.buffered.push(buf);
-          dbg(`seg${idx} buffered ${buf.length}B (frontier=${this.#frontier()})`);
-        }
+        if (!this.#closed) this.#cb.onAudio(buf);
       },
       onFinish: () => {
-        dbg(`seg${idx} finish (${seg.bytes}B total)`);
-        this.#finishSegment(idx);
+        if (!this.#closed) this.#cb.onFinish();
       },
       onError: (err) => {
         if (this.#closed) return;
-        dbg(`seg${idx} error: ${err.message}`);
-        // A dead segment must not dam the pipeline behind it.
-        this.#finishSegment(idx);
+        dbg(`pipeline error: ${err.message}`);
         this.#cb.onError?.(err);
+        this.#cb.onFinish();
       },
     });
-    return seg;
-  }
-
-  // Index of the first unfinished segment — the one allowed to play live.
-  #frontier() {
-    for (let i = 0; i < this.#segments.length; i++) {
-      if (!this.#segments[i].finished) return i;
-    }
-    return this.#segments.length;
-  }
-
-  #finishSegment(idx) {
-    if (this.#closed || this.#segments[idx].finished) return;
-    this.#segments[idx].finished = true;
-    // Drain buffered audio of following segments up to the new frontier.
-    for (let i = idx + 1; i < this.#segments.length; i++) {
-      const seg = this.#segments[i];
-      const drained = seg.buffered.reduce((n, b) => n + b.length, 0);
-      if (drained) dbg(`seg${i} drained ${drained}B after seg${idx} finish`);
-      for (const buf of seg.buffered.splice(0)) this.#cb.onAudio(buf);
-      if (!seg.finished) break;
-    }
-    if (this.#ended && this.#segments.every((s) => s.finished)) this.#cb.onFinish();
-  }
-
-  #last() {
-    return this.#segments[this.#segments.length - 1];
   }
 
   pushText(text) {
     if (this.#closed || !text) return;
-    const seg = this.#last();
-    // Whitespace-only input must not count as content: a segment sealed with
-    // nothing but whitespace makes Fish finish with reason=error. Leading
-    // whitespace says nothing aloud — hold it until real text shows up.
-    if (!seg.gotText) {
+    // Leading whitespace says nothing aloud — hold it until real text.
+    if (!this.#gotText) {
       if (!/\S/.test(text)) return;
-      seg.gotText = true;
+      this.#gotText = true;
     }
-    seg.handle.pushText(text);
-  }
-
-  setVoice(referenceId) {
-    if (this.#closed) return;
-    this.#sealLast();
-    this.#openSegment(referenceId);
+    this.#handle.pushText(text);
   }
 
   endInput() {
     if (this.#closed) return;
-    this.#ended = true;
-    this.#sealLast();
-  }
-
-  // Close the current segment's input. A segment that never received text
-  // won't get a Fish "finish" event worth waiting for — drop it directly.
-  #sealLast() {
-    const seg = this.#last();
-    const idx = this.#segments.length - 1;
-    if (seg.gotText) {
-      dbg(`seg${idx} sealed (endInput)`);
-      seg.handle.endInput();
+    if (this.#gotText) {
+      this.#handle.endInput();
     } else {
-      dbg(`seg${idx} dropped (no text)`);
-      seg.handle.close();
-      this.#finishSegment(idx);
+      // Never received text: Fish won't send a "finish" worth waiting for.
+      dbg("pipeline dropped (no text)");
+      this.#handle.close();
+      this.#cb.onFinish();
     }
   }
 
   close() {
     this.#closed = true;
-    for (const seg of this.#segments) seg.handle.close();
+    this.#handle.close();
   }
 }
