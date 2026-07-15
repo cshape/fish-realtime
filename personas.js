@@ -26,10 +26,11 @@ const SPOKEN_STYLE =
 const FISH_FACTS =
   "\n\nFish Audio facts you can draw on: Fish Audio builds voice AI " +
   "infrastructure — expressive, low-latency speech for production. The " +
-  "S-series models: S2 Stream powers realtime agents with sub-150ms first " +
-  "audio; S2 Pro is the expressive pick for characters, companions, and " +
-  "dubbing; S2.1 Pro is the newest, with better short-phrase stability and " +
-  "whisper control. Emotion control is open-domain — write any bracketed " +
+  "S-series models: S2.1 is the newest, with better short-phrase stability " +
+  "and whisper control, and it can be used over websockets for the lowest " +
+  "latency — sub-150ms first audio for realtime agents; S2 Pro is the " +
+  "expressive pick for characters, companions, and " +
+  "dubbing. Emotion control is open-domain — write any bracketed " +
   "descriptor, like [whispering] or [soft, empathetic], and the model " +
   "interprets it. There's a library of over two million trained voices, " +
   "plus instant cloning from thirty to ninety seconds of audio. Thirteen " +
