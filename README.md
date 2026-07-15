@@ -21,10 +21,11 @@ browser spk <── PCM16 @24k ── server <── Fish TTS         (/v1/tts/l
   with its own voice, system prompt, spoken greeting, and scene tint. They map
   to the target markets: companions, accessible/interactive content, customer
   service.
-- **In-conversation tools** — the LLM emits inline tags (`[[voice:rhys]]`,
-  `[[persona:narrator]]`); the server strips them from the stream and swaps
-  the Fish voice **mid-reply** ("Sure — *[voice changes]* — how's this?").
-  Later voice segments synthesize concurrently and are delivered in order.
+- **In-conversation tools** — the LLM emits an inline tag
+  (`[[persona:narrator]]`); the server strips it from the stream and hands
+  the conversation to the new persona **mid-reply**, swapping prompt and
+  Fish voice in place. Later voice segments synthesize concurrently and are
+  delivered in order.
 - **The page** (`public/`) — Fish Audio's design language (Onest, canonical
   warm-gray scale) over an audio-reactive canvas. Horizontal ribbons use
   state-driven Fish colors for listening, thinking, and speaking. The live
@@ -47,7 +48,7 @@ npm start              # http://localhost:8787
 ```
 
 Headless end-to-end test (macOS, uses `say` as the mic) — covers greeting,
-barge-in and the `[[voice:x]]` directive round-trip:
+barge-in and the `[[persona:x]]` directive round-trip:
 
 ```sh
 npm run smoke
@@ -67,8 +68,9 @@ Voices are Fish reference IDs in `personas.js` — edit the catalog to recast.
 
 The same demo served over WebRTC via [LiveKit Agents](https://docs.livekit.io/agents/):
 
-- STT `deepgram/flux-general-en` via LiveKit Inference (same EOT settings as
-  fish mode; no Deepgram key needed in this mode)
+- STT Deepgram Flux via the `deepgram` JS plugin (direct `DEEPGRAM_API_KEY`,
+  not the inference gateway — the extra hop cost ~1.5s of turn latency);
+  thresholds tuned aggressive (eot 0.6, eager 0.4)
 - LLM `google/gemma-4-31b-it` via LiveKit Inference
 - TTS `fishaudio` JS plugin (direct `FISH_API_KEY`, not the inference
   gateway) with the same voice reference ids from `personas.js` — patched via
@@ -76,17 +78,15 @@ The same demo served over WebRTC via [LiveKit Agents](https://docs.livekit.io/ag
   chunk (crackle-free, same behavior as the Python plugin)
 
 The worker (`lk-agent.js`) is HOSTED ON LIVEKIT CLOUD — deploy updates with
-`lk agent deploy` (config in `livekit.toml`, image from `Dockerfile`, secret:
-`FISH_API_KEY`). The web service only needs `LIVEKIT_URL` / `LIVEKIT_API_KEY` /
-`LIVEKIT_API_SECRET` to mint tokens for `/lk`. For local agent dev run the
-server with `LK_AGENT_LOCAL=1 LK_AGENT_NAME=fish-lk-dev` so the dev worker
-never collides with the deployed one. Persona is chosen at join (dispatch
-metadata); switching personas mid-session starts a fresh room.
+`lk agent deploy` (config in `livekit.toml`, image from `Dockerfile`, secrets:
+`FISH_API_KEY`, `DEEPGRAM_API_KEY`). The web service only needs `LIVEKIT_URL` /
+`LIVEKIT_API_KEY` / `LIVEKIT_API_SECRET` to mint tokens for `/lk`. For local
+agent dev run the server with `LK_AGENT_LOCAL=1 LK_AGENT_NAME=fish-lk-dev` so
+the dev worker never collides with the deployed one. Persona is chosen at join
+(dispatch metadata); switching personas mid-session starts a fresh room.
 
-Latency parity: fish mode reports voice→voice as last-audible-mic-chunk →
-first-audio-on-the-wire, measured in `server.js`. LiveKit mode reports the
-matching span — `EOUMetrics.lastSpeakingTimeMs` → the agent-state transition
-to `speaking` (first audio published to the room) — measured in `lk-agent.js`
-and delivered to the same latency pill over the room's data channel. Both
-spans include STT finalization, LLM TTFT, and TTS TTFB, and both exclude the
-final downstream hop to the browser.
+Latency: both modes show the same ear-to-ear voice→voice pill, measured in the
+browser (`ui-shared.js`) — last mic frame with voice energy → first audible
+reply from the speaker — so it includes STT turn confirmation, both network
+legs, and playout buffering. Pipeline-internal breakdowns log to the console
+(fish: server `metrics` message; /lk: agent data message + `lk agent logs`).

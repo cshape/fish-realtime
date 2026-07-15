@@ -5,7 +5,7 @@
 //     -> Deepgram Flux STT (turn-taking built in: StartOfTurn / EndOfTurn,
 //        plus EagerEndOfTurn for speculative generation)
 //     -> Gemma LLM (OpenAI-compatible /chat/completions, streamed SSE)
-//     -> directive filter (inline [[voice:x]] / [[persona:x]] "tool calls")
+//     -> directive filter (inline [[persona:x]] "tool calls")
 //     -> sentence chunker
 //     -> Fish TTS websocket(s) (/v1/tts/live, msgpack — one per voice segment)
 //     -> browser (PCM16 @ 24 kHz, binary WS frames)
@@ -119,14 +119,14 @@ class SentenceChunker {
 
 // ---------------------------------------------------------------------------
 // Directive filter — the "tool call" layer. The LLM emits inline tags like
-// [[voice:rhys]] or [[persona:narrator]]; this filter strips them from the
-// streamed text (they must never be spoken or displayed) and reports them in
-// order, so a voice change lands exactly between the words around the tag.
-// Tags can be split across stream deltas, so text is held back only while a
-// plausible unclosed tag is pending.
+// [[persona:narrator]]; this filter strips them from the streamed text (they
+// must never be spoken or displayed) and reports them in order, so a persona
+// handoff lands exactly between the words around the tag. Tags can be split
+// across stream deltas, so text is held back only while a plausible unclosed
+// tag is pending.
 // ---------------------------------------------------------------------------
 
-const DIRECTIVE_RE = /^\[\[\s*(voice|persona)\s*:\s*([a-z0-9_-]+)\s*\]\]$/i;
+const DIRECTIVE_RE = /^\[\[\s*(persona)\s*:\s*([a-z0-9_-]+)\s*\]\]$/i;
 const MAX_TAG_LEN = 48; // longer than any real tag — beyond this it's prose
 
 class DirectiveFilter {
@@ -331,20 +331,6 @@ class Session {
       if (this.turn) this.#cancelTurn();
       this.sendClear();
       this.#startSpokenLine(pickGreeting(id));
-    }
-  }
-
-  // Switch voice from the UI. Speaks the voice's preview line so the change
-  // is heard immediately.
-  setVoice(id, { preview = true } = {}) {
-    const v = VOICES[id];
-    if (!v) return;
-    this.voiceId = id;
-    this.sendJson({ type: "persona", persona: this.personaId, voice: id });
-    if (preview) {
-      if (this.turn) this.#cancelTurn();
-      this.sendClear();
-      this.#startSpokenLine(v.preview);
     }
   }
 
@@ -629,7 +615,7 @@ class Session {
       finished: false,
       inHistory: false,
       eager: speculative,
-      spokenLine, // greeting / voice preview: no LLM, no metrics
+      spokenLine, // greeting: no LLM, no metrics
       systemEvent, // synthetic committed LLM turn; not attributed to the user
       pendingState: {}, // directive-staged {personaId, voiceId}
       outbox: [],
@@ -673,7 +659,7 @@ class Session {
     });
   }
 
-  // A canned line (persona greeting, voice preview) — TTS only, no LLM. It
+  // A canned line (persona greeting) — TTS only, no LLM. It
   // still occupies the turn slot so barge-in and clear work normally.
   #startSpokenLine(text) {
     const turn = this.#newTurn(null, { spokenLine: true });
@@ -695,29 +681,20 @@ class Session {
     this.#runAgentTurn(turn);
   }
 
-  // A directive the LLM emitted mid-reply. Voice changes land exactly where
-  // the tag sat in the text; session-level state is staged so speculative
-  // rollbacks leave no trace. Directives that change nothing (the model
-  // repeating a tag, or naming the voice it's already using) are dropped —
+  // A persona handoff the LLM emitted mid-reply. The voice swap lands exactly
+  // where the tag sat in the text; session-level state is staged so
+  // speculative rollbacks leave no trace. Directives that change nothing (the
+  // model repeating a tag, or naming the persona it already is) are dropped —
   // every needless setVoice spawns a Fish socket for no reason.
-  #applyDirective(turn, { kind, id }) {
+  #applyDirective(turn, { id }) {
     const effVoice = () => turn.pendingState.voiceId ?? this.voiceId;
     const effPersona = () => turn.pendingState.personaId ?? this.personaId;
-    if (kind === "voice") {
-      const v = VOICES[id];
-      if (!v || id === effVoice()) return;
-      turn.fish.setVoice(v.id);
-      this.#stageState(turn, { voiceId: id });
-      this.#deliver(turn, "json", { type: "tool", tool: "change_voice", voice: id });
-      console.log(`[session] ${this.sid} directive: voice -> ${id}`);
-    } else if (kind === "persona") {
-      const p = PERSONAS[id];
-      if (!p || id === effPersona()) return;
-      if (p.voice !== effVoice()) turn.fish.setVoice(VOICES[p.voice].id);
-      this.#stageState(turn, { personaId: id, voiceId: p.voice });
-      this.#deliver(turn, "json", { type: "tool", tool: "change_persona", persona: id, voice: p.voice });
-      console.log(`[session] ${this.sid} directive: persona -> ${id}`);
-    }
+    const p = PERSONAS[id];
+    if (!p || id === effPersona()) return;
+    if (p.voice !== effVoice()) turn.fish.setVoice(VOICES[p.voice].id);
+    this.#stageState(turn, { personaId: id, voiceId: p.voice });
+    this.#deliver(turn, "json", { type: "tool", tool: "change_persona", persona: id, voice: p.voice });
+    console.log(`[session] ${this.sid} directive: persona -> ${id}`);
   }
 
   #stageState(turn, changes) {
@@ -932,8 +909,6 @@ server.on("upgrade", (req, socket, head) => {
           session.applyConfig(msg);
         } else if (msg.type === "set_persona") {
           session.setPersona(msg.id, { greet: msg.greet !== false });
-        } else if (msg.type === "set_voice") {
-          session.setVoice(msg.id, { preview: msg.preview !== false });
         } else if (msg.type === "inactivity_nudge") {
           session.triggerInactivityNudge();
         }

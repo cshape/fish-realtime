@@ -22,7 +22,7 @@ export function createUI({ onPickPersona }) {
   window.__scene = scene; // console/test access
 
   const state = {
-    catalog: { personas: [], voices: [] },
+    catalog: { personas: [] },
     personaId: "guide",
   };
 

@@ -1,80 +1,12 @@
 // Persona + voice catalog. This is the product surface: each persona targets
-// a market segment (companions, accessible content, customer service), and
-// the voice catalog is what the change-voice tool picks from.
+// a market segment (companions, accessible content, customer service) and
+// speaks with its own fixed Fish voice.
 
 export const VOICES = {
-  stellan: {
-    key: "stellan",
-    id: "747b05c0add940baa95270cf68c0cc2e",
-    name: "Stellan",
-    gender: "male",
-    accent: "American",
-    preview: "Stellan here. Steady hands, low voice. Where were we?",
-  },
-  sawyer: {
-    key: "sawyer",
-    id: "fa4c9eb3dccc4806b382b40d61c6b10a",
-    name: "Sawyer",
-    gender: "male",
-    accent: "American",
-    preview: "Hey, Sawyer speaking. Yeah, this suits me. Keep going.",
-  },
-  marlowe: {
-    key: "marlowe",
-    id: "4501d82f5de3467ebf4d7ef095a2deee",
-    name: "Marlowe",
-    gender: "female",
-    accent: "American",
-    preview: "This is Marlowe. Clear enough? Good. So, what's next?",
-  },
-  marley: {
-    key: "marley",
-    id: "51b44863613e405a896f7f4294c6e6d0",
-    name: "Marley",
-    gender: "female",
-    accent: "American",
-    preview: "Ooh, hi — Marley now. I like this one. What were you saying?",
-  },
-  alistair: {
-    key: "alistair",
-    id: "9a3a69c63dbc4774ac41b03945229dc8",
-    name: "Alistair",
-    gender: "male",
-    accent: "British",
-    preview: "Alistair, at your service. Rather better, wouldn't you say?",
-  },
-  rhys: {
-    key: "rhys",
-    id: "43d0c55ea6814a9dab44a06ddfe03658",
-    name: "Rhys",
-    gender: "male",
-    accent: "British",
-    preview: "Rhys. Right then — how's this treating your ears?",
-  },
-  maeve: {
-    key: "maeve",
-    id: "41db1fc3c3624332bec9997ff3d3d353",
-    name: "Maeve",
-    gender: "female",
-    accent: "British",
-    preview: "Maeve speaking. Lovely to be heard. Do carry on.",
-  },
-  briony: {
-    key: "briony",
-    id: "10b2254869cf4340bdb801928e2fc88e",
-    name: "Briony",
-    gender: "female",
-    accent: "British",
-    preview: "Briony, hello! Fresh voice, same conversation. Go on.",
-  },
-  sienna: {
-    key: "sienna",
-    id: "ca3007f96ae7499ab87d27ea3599956a",
-    name: "Sienna",
-    gender: "female",
-    accent: "American",
-    preview: "Sienna here. I think this voice suits us rather nicely, don't you?",
-  },
+  marlowe: { key: "marlowe", id: "4501d82f5de3467ebf4d7ef095a2deee" },
+  sienna: { key: "sienna", id: "ca3007f96ae7499ab87d27ea3599956a" },
+  alistair: { key: "alistair", id: "9a3a69c63dbc4774ac41b03945229dc8" },
+  maeve: { key: "maeve", id: "41db1fc3c3624332bec9997ff3d3d353" },
 };
 
 // Spoken-aloud ground rules shared by every persona.
@@ -93,16 +25,16 @@ export const PERSONAS = {
     theme: { tint: "#2a9d90", glow: "#3ccb7f" },
     greetings: [
       "Hey — you're live with Fish Audio. Interrupt me anytime. What should we try first?",
-      "Welcome in. Ask me to switch voices, or just start talking.",
+      "Welcome in. Interrupt me whenever — just start talking.",
       "Hey there. This is all live — cut me off mid-sentence, I don't mind.",
       "You made it. Want the tour, or do you just want to play?",
-      "Hi — Fish Audio here. Try interrupting me, or ask for a new voice.",
+      "Hi — Fish Audio here. Try interrupting me, or hand me a new role.",
     ],
     prompt:
       "You are the Guide on Fish Audio's realtime voice demo — warm, sharp, " +
       "and genuinely helpful, never salesy. The visitor just landed on the " +
-      "page. Help them play: they can interrupt you mid-sentence, ask you " +
-      "to change your voice, or switch you into a different persona. If " +
+      "page. Help them play: they can interrupt you mid-sentence or " +
+      "switch you into a different persona. If " +
       "they ask how this works: their speech is transcribed live, a " +
       "language model thinks, and Fish Audio's text-to-speech answers — " +
       "streamed end to end in well under a second. If they ask about " +
@@ -179,27 +111,21 @@ export const DEFAULT_PERSONA = "guide";
 
 // Tool instructions appended to every persona's system prompt. The model
 // "calls a tool" by emitting an inline tag; the server strips it from the
-// stream, swaps the TTS voice (or persona) mid-reply, and the text after
-// the tag comes out in the new voice.
-const voiceList = Object.values(VOICES)
-  .map((v) => `${v.key} (${v.gender}, ${v.accent})`)
-  .join(", ");
+// stream, swaps persona (prompt + voice) mid-reply, and the text after the
+// tag comes out as the new persona.
 const personaList = Object.values(PERSONAS)
   .map((p) => `${p.key} (${p.tagline})`)
   .join(", ");
 
 const TOOL_RULES =
-  "\n\nYou can change your voice, or hand the conversation to a different " +
-  "persona, when the user asks. Do it by writing a tag inline in your " +
-  "reply, exactly like [[voice:rhys]] or [[persona:narrator]]. The tag is " +
-  "silent and invisible; everything you say after it comes out in the new " +
-  "voice. Put the tag at the very START of your reply so the whole answer " +
-  "is heard in the new voice — for example: \"[[voice:maeve]] There we go " +
-  "— how do I sound now?\". Write each tag exactly once and never repeat " +
-  "it. If the user asks for a kind of voice, pick the best fit yourself. " +
-  `Voices: ${voiceList}. Personas: ${personaList}. Only emit a tag when ` +
-  "the user asks for a change, and never mention tags or say their names " +
-  "as commands.";
+  "\n\nYou can hand the conversation to a different persona when the user " +
+  "asks. Do it by writing a tag inline in your reply, exactly like " +
+  "[[persona:narrator]]. The tag is silent and invisible; everything you " +
+  "say after it comes out as the new persona, in its voice. Put the tag at " +
+  "the very START of your reply so the whole answer is heard that way. " +
+  "Write each tag exactly once and never repeat it. " +
+  `Personas: ${personaList}. Only emit a tag when the user asks for a ` +
+  "change, and never mention tags or say their names as commands.";
 
 export function systemPromptFor(personaKey) {
   const p = PERSONAS[personaKey] ?? PERSONAS[DEFAULT_PERSONA];
@@ -222,9 +148,6 @@ export function publicCatalog() {
   return {
     personas: Object.values(PERSONAS).map(({ key, name, tagline, voice, theme }) => ({
       key, name, tagline, voice, theme,
-    })),
-    voices: Object.values(VOICES).map(({ key, name, gender, accent }) => ({
-      key, name, gender, accent,
     })),
   };
 }

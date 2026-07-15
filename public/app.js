@@ -227,7 +227,7 @@ function stop() {
 function handleEvent(msg) {
   switch (msg.type) {
     case "session":
-      ui.state.catalog = { personas: msg.personas, voices: msg.voices };
+      ui.state.catalog = { personas: msg.personas };
       ui.state.personaId = msg.persona;
       ui.renderPersonas();
       break;
