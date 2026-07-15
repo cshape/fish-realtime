@@ -17,10 +17,11 @@ browser spk <── PCM16 @24k ── server <── Fish TTS         (/v1/tts/l
 
 ## The product surface
 
-- **Personas** (`personas.js`) — Guide / Companion / Narrator / Concierge, each
-  with its own voice, system prompt, spoken greeting, and scene tint. They map
-  to the target markets: companions, accessible/interactive content, customer
-  service.
+- **Personas** (`personas.js`) — Guide / Companion / Salesperson / Concierge,
+  each with its own voice, system prompt, spoken greeting, and scene tint.
+  They map to the target markets: product education, companions, sales,
+  customer service. All are privately named "Fish" and know they're AIs
+  powered by Fish Audio.
 - **The page** (`public/`) — Fish Audio's design language (Onest, canonical
   warm-gray scale) over an audio-reactive canvas. Horizontal ribbons use
   state-driven Fish colors for listening, thinking, and speaking. The live
