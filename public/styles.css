@@ -458,8 +458,10 @@ body.session-fullscreen #mute { order: 1; }
 
 @media (max-width: 820px) {
   body.idle #dock {
+    /* Vertical space is scarce here: skip the desktop's symmetric bottom
+       frame and let the persona list run to the app's own bottom padding. */
     margin-top: clamp(12px, 3vh, 24px);
-    margin-bottom: calc(clamp(12px, 3vh, 24px) + 32px);
+    margin-bottom: 0;
   }
 
   body.idle #personas {
