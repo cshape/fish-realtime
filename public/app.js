@@ -250,14 +250,6 @@ function handleEvent(msg) {
       break;
     }
 
-    case "tool":
-      if (msg.tool === "change_persona") {
-        ui.state.personaId = msg.persona;
-        ui.applyTheme(ui.personaByKey()[msg.persona]);
-        ui.renderPersonas();
-      }
-      break;
-
     case "user_start":
       userTurnActive = true;
       ui.setOrb("listening");

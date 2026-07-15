@@ -28,13 +28,13 @@ export const PERSONAS = {
       "Welcome in. Interrupt me whenever — just start talking.",
       "Hey there. This is all live — cut me off mid-sentence, I don't mind.",
       "You made it. Want the tour, or do you just want to play?",
-      "Hi — Fish Audio here. Try interrupting me, or hand me a new role.",
+      "Hi — Fish Audio here. Try interrupting me, or just ask me anything.",
     ],
     prompt:
       "You are the Guide on Fish Audio's realtime voice demo — warm, sharp, " +
       "and genuinely helpful, never salesy. The visitor just landed on the " +
-      "page. Help them play: they can interrupt you mid-sentence or " +
-      "switch you into a different persona. If " +
+      "page. Help them play: they can interrupt you mid-sentence, or pick " +
+      "a different persona from the on-screen cards. If " +
       "they ask how this works: their speech is transcribed live, a " +
       "language model thinks, and Fish Audio's text-to-speech answers — " +
       "streamed end to end in well under a second. If they ask about " +
@@ -109,31 +109,7 @@ export const PERSONAS = {
 
 export const DEFAULT_PERSONA = "guide";
 
-// Tool instructions appended to every persona's system prompt. The model
-// "calls a tool" by emitting an inline tag; the server strips it from the
-// stream, swaps persona (prompt + voice) mid-reply, and the text after the
-// tag comes out as the new persona.
-const personaList = Object.values(PERSONAS)
-  .map((p) => `${p.key} (${p.tagline})`)
-  .join(", ");
-
-const TOOL_RULES =
-  "\n\nYou can hand the conversation to a different persona when the user " +
-  "asks. Do it by writing a tag inline in your reply, exactly like " +
-  "[[persona:narrator]]. The tag is silent and invisible; everything you " +
-  "say after it comes out as the new persona, in its voice. Put the tag at " +
-  "the very START of your reply so the whole answer is heard that way. " +
-  "Write each tag exactly once and never repeat it. " +
-  `Personas: ${personaList}. Only emit a tag when the user asks for a ` +
-  "change, and never mention tags or say their names as commands.";
-
 export function systemPromptFor(personaKey) {
-  const p = PERSONAS[personaKey] ?? PERSONAS[DEFAULT_PERSONA];
-  return `${p.prompt} ${SPOKEN_STYLE}${TOOL_RULES}`;
-}
-
-// LiveKit mode has no inline-directive filter, so its prompt omits TOOL_RULES.
-export function lkSystemPromptFor(personaKey) {
   const p = PERSONAS[personaKey] ?? PERSONAS[DEFAULT_PERSONA];
   return `${p.prompt} ${SPOKEN_STYLE}`;
 }

@@ -5,7 +5,6 @@
 //     -> Deepgram Flux STT (turn-taking built in: StartOfTurn / EndOfTurn,
 //        plus EagerEndOfTurn for speculative generation)
 //     -> Gemma LLM (OpenAI-compatible /chat/completions, streamed SSE)
-//     -> directive filter (inline [[persona:x]] "tool calls")
 //     -> sentence chunker
 //     -> Fish TTS websocket(s) (/v1/tts/live, msgpack — one per voice segment)
 //     -> browser (PCM16 @ 24 kHz, binary WS frames)
@@ -110,69 +109,6 @@ class SentenceChunker {
   }
 
   // Returns whatever is left (trailing text without final punctuation).
-  flush() {
-    const rest = this.#buf;
-    this.#buf = "";
-    return rest;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// Directive filter — the "tool call" layer. The LLM emits inline tags like
-// [[persona:narrator]]; this filter strips them from the streamed text (they
-// must never be spoken or displayed) and reports them in order, so a persona
-// handoff lands exactly between the words around the tag. Tags can be split
-// across stream deltas, so text is held back only while a plausible unclosed
-// tag is pending.
-// ---------------------------------------------------------------------------
-
-const DIRECTIVE_RE = /^\[\[\s*(persona)\s*:\s*([a-z0-9_-]+)\s*\]\]$/i;
-const MAX_TAG_LEN = 48; // longer than any real tag — beyond this it's prose
-
-class DirectiveFilter {
-  #buf = "";
-
-  // Returns ordered ops: [{text} | {directive: {kind, id}}, ...]
-  push(delta) {
-    this.#buf += delta;
-    const ops = [];
-    const emitText = (s) => {
-      if (!s) return;
-      const last = ops[ops.length - 1];
-      if (last?.text !== undefined) last.text += s;
-      else ops.push({ text: s });
-    };
-    for (;;) {
-      const start = this.#buf.indexOf("[[");
-      if (start === -1) {
-        // No tag opener; hold a trailing "[" in case "[[" is split.
-        const keep = this.#buf.endsWith("[") ? this.#buf.length - 1 : this.#buf.length;
-        emitText(this.#buf.slice(0, keep));
-        this.#buf = this.#buf.slice(keep);
-        break;
-      }
-      emitText(this.#buf.slice(0, start));
-      this.#buf = this.#buf.slice(start);
-      const end = this.#buf.indexOf("]]");
-      if (end === -1) {
-        if (this.#buf.length > MAX_TAG_LEN) {
-          // Too long to be a tag — it's prose that happens to contain "[[".
-          emitText(this.#buf.slice(0, 2));
-          this.#buf = this.#buf.slice(2);
-          continue;
-        }
-        break; // plausible unclosed tag — wait for more tokens
-      }
-      const candidate = this.#buf.slice(0, end + 2);
-      const m = DIRECTIVE_RE.exec(candidate);
-      if (m) ops.push({ directive: { kind: m[1].toLowerCase(), id: m[2].toLowerCase() } });
-      else emitText(candidate); // some other [[...]] — pass through
-      this.#buf = this.#buf.slice(end + 2);
-    }
-    return ops;
-  }
-
-  // Any held-back text that never became a tag.
   flush() {
     const rest = this.#buf;
     this.#buf = "";
@@ -319,7 +255,7 @@ class Session {
     return VOICES[this.voiceId]?.id ?? null;
   }
 
-  // Switch persona (from the UI or a directive). Keeps conversation history —
+  // Switch persona (from the UI). Keeps conversation history —
   // the new persona knows what was said — but swaps prompt, voice, and theme.
   setPersona(id, { greet } = {}) {
     const p = PERSONAS[id];
@@ -561,10 +497,6 @@ class Session {
     turn.committed = true;
     turn.sttMs = sttMs;
     turn.speechEndWall = speechEndWall;
-    // Directive state changes staged while speculative apply only now — a
-    // rolled-back turn must not leave the session in a different voice.
-    Object.assign(this, turn.pendingState);
-    turn.pendingState = {};
     const buffered = turn.outbox.splice(0);
     for (const [kind, data] of buffered) this.#deliver(turn, kind, data);
     // Speculative turn that already finished synthesis while buffered.
@@ -617,7 +549,6 @@ class Session {
       eager: speculative,
       spokenLine, // greeting: no LLM, no metrics
       systemEvent, // synthetic committed LLM turn; not attributed to the user
-      pendingState: {}, // directive-staged {personaId, voiceId}
       outbox: [],
       // Latency bookkeeping (wall-clock ms)
       llmStartWall: Date.now(),
@@ -646,10 +577,10 @@ class Session {
       onError: (err) => {
         console.error("[fish]", err.message);
         if (this.turn?.id !== turn.id) return;
-        // A single segment erroring (e.g. after a voice change) is NOT fatal:
-        // the pipeline marks it finished and keeps delivering the healthy
-        // segments, and onFinish still fires. Only give up when the turn has
-        // produced no audio at all — a genuine startup failure.
+        // A segment erroring is NOT fatal: the pipeline marks it finished and
+        // keeps delivering the healthy segments, and onFinish still fires.
+        // Only give up when the turn has produced no audio at all — a genuine
+        // startup failure.
         if (turn.firstAudioWall !== 0) return;
         this.turn = null;
         turn.fish?.close();
@@ -681,34 +612,12 @@ class Session {
     this.#runAgentTurn(turn);
   }
 
-  // A persona handoff the LLM emitted mid-reply. The voice swap lands exactly
-  // where the tag sat in the text; session-level state is staged so
-  // speculative rollbacks leave no trace. Directives that change nothing (the
-  // model repeating a tag, or naming the persona it already is) are dropped —
-  // every needless setVoice spawns a Fish socket for no reason.
-  #applyDirective(turn, { id }) {
-    const effVoice = () => turn.pendingState.voiceId ?? this.voiceId;
-    const effPersona = () => turn.pendingState.personaId ?? this.personaId;
-    const p = PERSONAS[id];
-    if (!p || id === effPersona()) return;
-    if (p.voice !== effVoice()) turn.fish.setVoice(VOICES[p.voice].id);
-    this.#stageState(turn, { personaId: id, voiceId: p.voice });
-    this.#deliver(turn, "json", { type: "tool", tool: "change_persona", persona: id, voice: p.voice });
-    console.log(`[session] ${this.sid} directive: persona -> ${id}`);
-  }
-
-  #stageState(turn, changes) {
-    if (turn.committed) Object.assign(this, changes);
-    else Object.assign(turn.pendingState, changes);
-  }
-
   async #runAgentTurn(turn) {
     const live = () => this.turn?.id === turn.id;
     turn.fish = this.#openTurnPipeline(turn);
 
     const chunker = new SentenceChunker();
-    const directives = new DirectiveFilter();
-    let full = ""; // directive-free reply text, for history
+    let full = ""; // full reply text, for history
     const pushToFish = (text) => {
       if (!text) return;
       if (turn.firstTextPushWall === 0) turn.firstTextPushWall = Date.now();
@@ -733,18 +642,10 @@ class Session {
         (delta) => {
           if (!live()) return;
           if (turn.firstDeltaWall === 0) turn.firstDeltaWall = Date.now();
-          for (const op of directives.push(delta)) {
-            if (op.text !== undefined) onText(op.text);
-            else {
-              // Flush text before the tag so the voice changes between words.
-              pushToFish(chunker.flush());
-              this.#applyDirective(turn, op.directive);
-            }
-          }
+          onText(delta);
         },
       );
       if (!live()) return;
-      onText(directives.flush());
       pushToFish(chunker.flush());
       turn.fish.endInput();
       turn.inHistory = true;

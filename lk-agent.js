@@ -16,7 +16,7 @@ import { cli, defineAgent, inference, voice, ServerOptions } from "@livekit/agen
 import * as deepgram from "@livekit/agents-plugin-deepgram";
 import * as fishaudio from "@livekit/agents-plugin-fishaudio";
 import { fileURLToPath } from "node:url";
-import { VOICES, PERSONAS, DEFAULT_PERSONA, lkSystemPromptFor, pickGreeting } from "./personas.js";
+import { VOICES, PERSONAS, DEFAULT_PERSONA, systemPromptFor, pickGreeting } from "./personas.js";
 import { INACTIVITY_CONFIG, LLM_CONFIG, LK_AGENT_NAME_DEFAULT } from "./public/config.js";
 
 const STT_MODEL = process.env.LK_STT_MODEL || "flux-general-en";
@@ -158,7 +158,7 @@ export default defineAgent({
     });
 
     await session.start({
-      agent: voice.Agent.create({ instructions: lkSystemPromptFor(personaId) }),
+      agent: voice.Agent.create({ instructions: systemPromptFor(personaId) }),
       room: ctx.room,
     });
     await ctx.connect();

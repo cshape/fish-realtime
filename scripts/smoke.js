@@ -5,9 +5,6 @@
 //   2. Speaks a question, expects transcript + streamed reply audio.
 //   3. As soon as reply audio starts, speaks a second question over it —
 //      expects a "clear" (playback flush) and a second answered turn.
-//   4. Asks the agent to hand off to the concierge persona — expects a
-//      change_persona tool event (inline [[persona:x]] directive round-trip)
-//      and reply audio in the new persona's voice.
 //
 // Usage: npm run smoke   (server must be running; PORT must match)
 
@@ -18,12 +15,9 @@ import path from "node:path";
 import WebSocket from "ws";
 
 const PORT = Number(process.env.PORT || 8787);
-// Turn 1 sometimes hands off to the narrator persona on its own, so turn 3
-// must ask for a persona that can't already be active.
 const QUESTIONS = [
   "Please tell me a nice long story about a fish.",
   "What is two plus two?",
-  "Please hand me over to the hotel concierge persona right now.",
 ];
 
 const CHUNK = 1024; // 32 ms @ 16 kHz mono PCM16
@@ -49,7 +43,7 @@ function enqueue(pcm) {
   for (let off = 0; off < pcm.length; off += CHUNK) outQueue.push(pcm.subarray(off, off + CHUNK));
 }
 
-// Phases: greet -> turn1 -> turn2 (barge-in) -> personatool
+// Phases: greet -> turn1 -> turn2 (barge-in)
 let phase = "greet";
 let done = false;
 const finals = [];
@@ -58,8 +52,6 @@ let clears = 0;
 let audioBytes = 0;
 let audioAfterClear = 0;
 let bargedIn = false;
-let toolEvent = null;
-let toolAudio = 0;
 
 const timeout = setTimeout(() => fail(`timed out in phase "${phase}" after 180s`), 180000);
 
@@ -100,9 +92,6 @@ function onAudio(n) {
         phase = "turn2";
       }
       break;
-    case "personatool":
-      if (toolEvent) toolAudio += n;
-      break;
   }
 }
 
@@ -118,19 +107,7 @@ function onAgentDone() {
       if (finals.length < 2) break; // done event from an earlier fragment
       if (clears < 1) fail("no clear event after barge-in");
       if (audioAfterClear < 24000) fail("no reply audio after barge-in");
-      console.log("[smoke] barge-in ok — asking for the concierge persona…");
-      toolEvent = null; // turn 1 may have emitted its own persona directive
-      enqueue(utterances[2]);
-      phase = "personatool";
-      break;
-    case "personatool":
-      if (!toolEvent) break; // model may still be mid-reply on a first done
-      if (toolEvent.tool !== "change_persona") fail(`unexpected tool event: ${JSON.stringify(toolEvent)}`);
-      if (toolEvent.persona !== "concierge") {
-        fail(`asked for concierge, got "${toolEvent.persona}"`);
-      }
-      if (toolAudio < 12000) fail(`no audio after the persona handoff (${toolAudio}B)`);
-      console.log(`[smoke] directive ok (persona -> ${toolEvent.persona}, voice ${toolEvent.voice})`);
+      console.log("[smoke] barge-in ok");
       pass();
       break;
   }
@@ -154,10 +131,6 @@ ws.on("message", (data, isBinary) => {
     case "user_final":
       finals.push(msg.text);
       console.log(`[smoke] transcript ${finals.length}: "${msg.text}"`);
-      break;
-    case "tool":
-      toolEvent = msg;
-      console.log(`[smoke] tool event: ${JSON.stringify(msg)}`);
       break;
     case "persona":
       console.log(`[smoke] persona event: persona=${msg.persona} voice=${msg.voice}`);

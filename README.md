@@ -3,14 +3,14 @@
 A [realtime.ai](https://realtime.ai)-style landing page for Fish Audio: land,
 tap, talk. One Node process, no framework — the engine is a port of
 [fish-bare-agent](https://github.com/cshape/fish-bare-agent) (WS transport)
-with personas and in-conversation tools on top.
+with personas on top.
 
 ```
 browser mic ── PCM16 @16k ──> server ──> Deepgram Flux    (STT + turn-taking)
                                 │            │ EndOfTurn transcript
                                 │            v
                                 │         Gemma            (OpenAI-compatible, streamed)
-                                │            │ tokens ─> directive filter ─> sentence chunker
+                                │            │ tokens ─> sentence chunker
                                 │            v
 browser spk <── PCM16 @24k ── server <── Fish TTS         (/v1/tts/live, one WS per voice segment)
 ```
@@ -21,11 +21,6 @@ browser spk <── PCM16 @24k ── server <── Fish TTS         (/v1/tts/l
   with its own voice, system prompt, spoken greeting, and scene tint. They map
   to the target markets: companions, accessible/interactive content, customer
   service.
-- **In-conversation tools** — the LLM emits an inline tag
-  (`[[persona:narrator]]`); the server strips it from the stream and hands
-  the conversation to the new persona **mid-reply**, swapping prompt and
-  Fish voice in place. Later voice segments synthesize concurrently and are
-  delivered in order.
 - **The page** (`public/`) — Fish Audio's design language (Onest, canonical
   warm-gray scale) over an audio-reactive canvas. Horizontal ribbons use
   state-driven Fish colors for listening, thinking, and speaking. The live
@@ -47,8 +42,8 @@ npm install
 npm start              # http://localhost:8787
 ```
 
-Headless end-to-end test (macOS, uses `say` as the mic) — covers greeting,
-barge-in and the `[[persona:x]]` directive round-trip:
+Headless end-to-end test (macOS, uses `say` as the mic) — covers the greeting
+and barge-in:
 
 ```sh
 npm run smoke
