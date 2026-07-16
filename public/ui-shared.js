@@ -46,14 +46,30 @@ export function createUI({ onPickPersona }) {
     scene.setTheme(p.theme.tint, p.theme.glow);
   }
 
+  // Hidden personas (the brand support reps) only get a card when deep-linked
+  // to, and they take a random curated card's slot so the rail stays four
+  // wide. Decided once per page load: re-renders don't reshuffle, and the
+  // linked card stays in the rail even after switching to another persona.
+  let hiddenSwap = null; // { addKey, dropKey }
+
+  function visiblePersonas() {
+    const personas = state.catalog.personas;
+    const active = personas.find((p) => p.key === state.personaId);
+    if (active?.hidden && hiddenSwap?.addKey !== active.key) {
+      const curated = personas.filter((p) => !p.hidden);
+      hiddenSwap = {
+        addKey: active.key,
+        dropKey: curated[Math.floor(Math.random() * curated.length)]?.key,
+      };
+    }
+    return personas.filter(
+      (p) => (p.hidden ? p.key === hiddenSwap?.addKey : p.key !== hiddenSwap?.dropKey),
+    );
+  }
+
   function renderPersonas() {
     els.personas.innerHTML = "";
-    // Hidden personas (the brand support reps) only get a card when they're
-    // the active persona — i.e. someone deep-linked to them.
-    const visible = state.catalog.personas.filter(
-      (p) => !p.hidden || p.key === state.personaId,
-    );
-    for (const p of visible) {
+    for (const p of visiblePersonas()) {
       const b = document.createElement("button");
       b.className = "persona" + (p.key === state.personaId ? " on" : "");
       b.setAttribute("aria-label", `${p.name} — ${p.tagline}`);
