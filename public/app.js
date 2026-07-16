@@ -210,8 +210,9 @@ function stop() {
 function handleEvent(msg) {
   switch (msg.type) {
     case "session":
+      // Refresh the catalog but keep the local selection (idle boot may have
+      // preselected a deep-linked persona); "ready" sends it to the server.
       ui.state.catalog = { personas: msg.personas };
-      ui.state.personaId = msg.persona;
       ui.renderPersonas();
       break;
 

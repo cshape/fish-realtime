@@ -48,7 +48,12 @@ export function createUI({ onPickPersona }) {
 
   function renderPersonas() {
     els.personas.innerHTML = "";
-    for (const p of state.catalog.personas) {
+    // Hidden personas (the brand support reps) only get a card when they're
+    // the active persona — i.e. someone deep-linked to them.
+    const visible = state.catalog.personas.filter(
+      (p) => !p.hidden || p.key === state.personaId,
+    );
+    for (const p of visible) {
       const b = document.createElement("button");
       b.className = "persona" + (p.key === state.personaId ? " on" : "");
       b.setAttribute("aria-label", `${p.name} — ${p.tagline}`);
@@ -123,6 +128,12 @@ export function createUI({ onPickPersona }) {
     personaFitFrame = requestAnimationFrame(fitPersonaLabels);
   });
 
+  // Deep link: /guide, /airbnb, /lk/concierge, … preselects that persona.
+  function pathPersona(personas) {
+    const key = location.pathname.replace(/^\/(lk\/)?/, "").replace(/\/$/, "");
+    return personas.some((p) => p.key === key) ? key : null;
+  }
+
   // Idle boot: render personas from the static catalog so the page is alive
   // before any connection; a live session's catalog wins if it arrives first.
   fetch("/catalog.json")
@@ -130,8 +141,8 @@ export function createUI({ onPickPersona }) {
     .then((data) => {
       if (!data || state.catalog.personas.length) return;
       state.catalog = data;
-      // The server owns the default persona.
-      setActivePersona(data.persona ?? state.personaId);
+      // A persona in the URL path wins; otherwise the server owns the default.
+      setActivePersona(pathPersona(data.personas) ?? data.persona ?? state.personaId);
     })
     .catch(() => {});
 

@@ -27,7 +27,7 @@ import { randomUUID } from "node:crypto";
 import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import { AccessToken, RoomConfiguration, RoomAgentDispatch } from "livekit-server-sdk";
-import { VOICES, PERSONAS, DEFAULT_PERSONA, systemPromptFor, publicCatalog, pickGreeting } from "./personas.js";
+import { VOICES, PERSONAS, DEFAULT_PERSONA, isPersona, systemPromptFor, publicCatalog, pickGreeting } from "./personas.js";
 import { FishPipeline, TTS_SAMPLE_RATE, FISH_MODEL, FISH_LATENCY_MODE } from "./tts.js";
 import { AUDIO_CONFIG, INACTIVITY_CONFIG, LLM_CONFIG, LK_AGENT_NAME_DEFAULT } from "./public/config.js";
 
@@ -240,7 +240,7 @@ class Session {
   // Switch persona (from the UI). Keeps conversation history — the new
   // persona knows what was said — but swaps prompt and voice, and greets.
   setPersona(id) {
-    if (!PERSONAS[id]) return;
+    if (!isPersona(id)) return;
     this.personaId = id;
     this.sendJson({ type: "persona", persona: id });
     if (this.turn) this.#cancelTurn();
@@ -677,7 +677,7 @@ const LK_ENABLED = Boolean(
 );
 
 async function lkToken(personaParam) {
-  const persona = PERSONAS[personaParam] ? personaParam : DEFAULT_PERSONA;
+  const persona = isPersona(personaParam) ? personaParam : DEFAULT_PERSONA;
   const room = `lk-${randomUUID().slice(0, 8)}`;
   const at = new AccessToken(process.env.LIVEKIT_API_KEY, process.env.LIVEKIT_API_SECRET, {
     identity: `user-${randomUUID().slice(0, 8)}`,
@@ -738,7 +738,14 @@ const server = http.createServer((req, res) => {
     return;
   }
   let file = url.pathname === "/" ? "/index.html" : url.pathname;
-  if (url.pathname === "/lk") file = "/lk.html";
+  // Persona deep links: /guide, /airbnb, … serve the app with that persona
+  // preselected (the client reads the path — see ui-shared.js). Same for
+  // LiveKit mode at /lk/<persona>.
+  if (url.pathname === "/lk" || (url.pathname.startsWith("/lk/") && isPersona(url.pathname.slice(4)))) {
+    file = "/lk.html";
+  } else if (isPersona(url.pathname.slice(1))) {
+    file = "/index.html";
+  }
   file = path.normalize(file).replace(/^(\.\.[/\\])+/, "");
   const full = path.join(__dirname, "public", file);
   if (!full.startsWith(path.join(__dirname, "public"))) {
