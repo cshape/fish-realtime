@@ -5,8 +5,8 @@
 # all Render tiers; free tier idles after 15 min (cold start kills the
 # first-visit experience — use Starter for a real test).
 #
-# If a fish-realtime service already exists in the dashboard, keep the name
-# below in sync with it so a Blueprint sync adopts it instead of duplicating.
+# The name matches the LIVE service (fish-voice-agents, auto-deploys from
+# main) so a Blueprint sync adopts it instead of spawning a duplicate.
 #
 # Deploy: Render Dashboard -> Blueprints -> New Blueprint Instance -> this
 # repo. Set the prompted env vars (values are in local .env). Do NOT set
@@ -20,7 +20,7 @@
 
 services:
   - type: web
-    name: fish-realtime
+    name: fish-voice-agents
     runtime: node
     plan: starter
     buildCommand: npm ci --omit=dev
