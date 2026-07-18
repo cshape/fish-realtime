@@ -345,8 +345,14 @@ class Session {
   // (judge verdict), each with its own goodbye prompt.
   endCall(reason = "idle", prompt = INACTIVITY_CONFIG.hangupPrompt) {
     if (this.callOver || this.turn?.endCall) return;
-    if (this.turn) this.#cancelTurn();
-    this.sendClear();
+    // Never cut audio that's already playing: with no turn in flight the
+    // goodbye simply queues behind whatever the agent is still saying.
+    // (Kick verdicts arrive via the action queue, so the reply always gets
+    // to finish; cancel+clear only happens for a genuinely mid-flight turn.)
+    if (this.turn) {
+      this.#cancelTurn();
+      this.sendClear();
+    }
     this.#startTurn(prompt, { speculative: false, systemEvent: true });
     if (this.turn) this.turn.endCall = reason;
   }
