@@ -86,6 +86,35 @@ body.ru-idle #typed {
 
 body.session-fullscreen #hero { display: none; }
 
+/* --- header: achievement progress ---------------------------------------- */
+
+.header-right {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+#ach-progress {
+  color: var(--text-dim);
+  font-size: 11px;
+  opacity: 0.85;
+  transition: opacity 400ms ease;
+}
+
+#ach-progress .star {
+  color: color-mix(in srgb, var(--tint) 80%, var(--text));
+}
+
+#ach-progress.bump {
+  animation: progress-bump 700ms cubic-bezier(0.2, 1.4, 0.4, 1);
+}
+
+@keyframes progress-bump {
+  0% { transform: scale(1); }
+  35% { transform: scale(1.25); }
+  100% { transform: scale(1); }
+}
+
 /* --- who card ------------------------------------------------------------- */
 
 #who {

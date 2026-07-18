@@ -32,7 +32,10 @@
         </svg>
         <span class="brand-name">Fish&nbsp;Audio</span>
       </a>
-      <span id="latency" class="mono"></span>
+      <span class="header-right">
+        <span id="ach-progress" class="mono hidden"></span>
+        <span id="latency" class="mono"></span>
+      </span>
     </header>
 
     <!-- Who you're talking to right now. -->
@@ -48,14 +51,13 @@
       <section id="hero">
         <h1>Fish&nbsp;Roulette</h1>
         <p class="hero-sub">
-          You'll be connected to a random stranger — well, a random character.
-          Talk about anything. Skip whenever you like; fair warning, they can
-          hang up on you too. Each one is hiding a secret achievement worth
+          Ten strangers, one line. Talk about anything, skip anyone —
+          they can hang up on you too. Each hides an achievement worth
           free Fish credits.
         </p>
         <div id="cast" aria-hidden="true"></div>
         <button id="start">Meet someone</button>
-        <p class="hero-fine">Uses your microphone. Conversations are recorded to make the characters better.</p>
+        <p class="hero-fine">Mic required. Conversations are recorded to improve the characters.</p>
       </section>
 
       <div id="dock">
@@ -106,7 +108,7 @@
   <div id="sheet" class="hidden" role="dialog" aria-modal="true" aria-labelledby="sheet-title">
     <div class="sheet-panel">
       <h2 id="sheet-title">Penny for your thoughts?</h2>
-      <p id="sheet-sub">Tell us anything — what felt good, what felt off, who you'd talk to again.</p>
+      <p id="sheet-sub">What felt good? What felt off?</p>
       <textarea id="fb-text" rows="4" placeholder="It got weird when…"></textarea>
       <input id="fb-email" type="email" placeholder="you@email.com — for your Fish credits" autocomplete="email" />
       <div class="sheet-row">

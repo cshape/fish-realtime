@@ -30,6 +30,7 @@ import { AccessToken, RoomConfiguration, RoomAgentDispatch } from "livekit-serve
 import { VOICES, PERSONAS, DEFAULT_PERSONA, isPersona, systemPromptFor, publicCatalog, pickGreeting } from "./personas.js";
 import { CHARACTERS, pickCharacter, characterSystemPrompt, pickCharacterGreeting, characterVoiceId, publicCharacter } from "./characters.js";
 import { logRoulette, logFeedback } from "./datalog.js";
+import { judgeTurn, judgeEnabled } from "./judge.js";
 import { FishPipeline, TTS_SAMPLE_RATE, FISH_MODEL, FISH_LATENCY_MODE } from "./tts.js";
 import { AUDIO_CONFIG, INACTIVITY_CONFIG, LLM_CONFIG, LK_AGENT_NAME_DEFAULT } from "./public/config.js";
 
@@ -122,55 +123,24 @@ class SentenceChunker {
 }
 
 // ---------------------------------------------------------------------------
-// Directive filter — strips inline [[tag]] directives (roulette: [[kick]],
-// [[achievement]]) from the LLM stream before the sentence chunker sees
-// them, invoking onDirective(name) per complete tag. Text is only held back
-// while a potential tag is open, so TTS latency is unaffected without tags.
+// Roulette reaction prompts — spoken lines the server injects when a judge
+// verdict (judge.js) lands. The voice LLM never decides kicks/achievements.
 // ---------------------------------------------------------------------------
 
-class DirectiveFilter {
-  #buf = "";
-  #onDirective;
+const KICK_GOODBYE_PROMPT =
+  "You've had enough of this caller — they've been rude, creepy, or " +
+  "hopelessly dull. In character, say ONE short parting line as you hang " +
+  "up on them. Blunt is fine. No questions, under two sentences.";
 
-  constructor(onDirective) {
-    this.#onDirective = onDirective;
-  }
-
-  push(text) {
-    this.#buf += text;
-    return this.#drain(false);
-  }
-
-  flush() {
-    return this.#drain(true);
-  }
-
-  #drain(final) {
-    let out = "";
-    for (;;) {
-      const open = this.#buf.indexOf("[[");
-      if (open === -1) {
-        // Hold back a trailing "[" — it may become "[[" with the next token.
-        const keep = final || !this.#buf.endsWith("[") ? this.#buf.length : this.#buf.length - 1;
-        out += this.#buf.slice(0, keep);
-        this.#buf = this.#buf.slice(keep);
-        return out;
-      }
-      out += this.#buf.slice(0, open);
-      const close = this.#buf.indexOf("]]", open + 2);
-      if (close === -1) {
-        this.#buf = this.#buf.slice(open);
-        // An unclosed "tag" that runs long (or ends the stream) is text.
-        if (final || this.#buf.length > 64) {
-          out += this.#buf;
-          this.#buf = "";
-        }
-        return out;
-      }
-      this.#onDirective(this.#buf.slice(open + 2, close).trim().toLowerCase());
-      this.#buf = this.#buf.slice(close + 2);
-    }
-  }
+function achievementPrompt(c) {
+  return (
+    `The caller just did something special: they genuinely ${c.achievement.trigger} ` +
+    `That unlocked the hidden achievement "${c.achievement.name}". React in ` +
+    "character with real delight: tell them they've unlocked a hidden " +
+    "achievement and can claim free Fish Audio credits by tapping the " +
+    "little feedback button and leaving their email. Keep it to two short " +
+    "sentences and stay in the flow of the conversation."
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -278,6 +248,9 @@ class Session {
     // The agent hung up (kick or idle): the line is dead — no barge-in, no
     // new turns. Roulette revives it with the next character.
     this.callOver = false;
+    // Spoken reactions waiting for the current turn to finish (judge
+    // verdicts: achievement congrats, kick goodbye).
+    this.pendingActions = [];
     this.destroyed = false;
     // Wall time of the last mic chunk with speech-level energy. Flux's
     // TurnInfo events have no word timings (audio_window_end just tracks how
@@ -339,6 +312,7 @@ class Session {
     this.history = [];
     r.unlocked = false;
     this.callOver = false;
+    this.pendingActions.length = 0; // reactions meant for the old character
     const c = pickCharacter(r.seen);
     r.character = c;
     r.seen.push(c.key);
@@ -359,21 +333,80 @@ class Session {
     this.sendJson({ type: "user_final", text });
     if (this.mode === "roulette") {
       logRoulette(this.sid, "user", { character: this.roulette.character?.key, text, typed: true });
+      this.#judgeUserTurn(text);
     }
     this.#startTurn(text, { speculative: false });
     this.#commitTurn(0, Date.now());
   }
 
-  // The agent hangs up on its own (idle caller): one short in-character
-  // parting line via a system-event turn, then the line goes dead. Shared
-  // by roulette characters and the persona demo — the client just sends
-  // {type:"end_call"} and reacts to {type:"call_ended"}.
-  endCall(reason = "idle") {
+  // The agent hangs up: one short in-character parting line via a
+  // system-event turn, then the line goes dead. reason "idle" (silent
+  // caller — shared with the persona demo via {type:"end_call"}) or "kick"
+  // (judge verdict), each with its own goodbye prompt.
+  endCall(reason = "idle", prompt = INACTIVITY_CONFIG.hangupPrompt) {
     if (this.callOver || this.turn?.endCall) return;
     if (this.turn) this.#cancelTurn();
     this.sendClear();
-    this.#startTurn(INACTIVITY_CONFIG.hangupPrompt, { speculative: false, systemEvent: true });
+    this.#startTurn(prompt, { speculative: false, systemEvent: true });
     if (this.turn) this.turn.endCall = reason;
+  }
+
+  // Queue a spoken reaction; it runs once no turn is in flight, so verdicts
+  // never cut the character off mid-reply.
+  #queueAction(fn) {
+    this.pendingActions.push(fn);
+    this.#tryDrain();
+  }
+
+  #tryDrain() {
+    if (this.destroyed || !this.pendingActions.length) return;
+    if (this.turn) {
+      setTimeout(() => this.#tryDrain(), 400);
+      return;
+    }
+    this.pendingActions.shift()();
+    if (this.pendingActions.length) setTimeout(() => this.#tryDrain(), 400);
+  }
+
+  // Fire-and-forget referee call for the user turn that just ended.
+  #judgeUserTurn(userText) {
+    if (this.mode !== "roulette" || this.callOver) return;
+    const c = this.roulette.character;
+    if (!c) return;
+    const history = [...this.history, { role: "user", content: userText }];
+    judgeTurn({ character: c, history, achievementUnlocked: this.roulette.unlocked }).then(
+      (verdict) => this.#applyVerdict(verdict, c.key),
+    );
+  }
+
+  #applyVerdict(verdict, characterKey) {
+    if (this.destroyed || this.callOver || this.mode !== "roulette") return;
+    if (this.roulette.character?.key !== characterKey) return; // caller skipped on
+    if (!verdict.kick && !verdict.achievement) return;
+    logRoulette(this.sid, "judge", { character: characterKey, ...verdict });
+    const stillValid = () =>
+      !this.destroyed && !this.callOver && this.mode === "roulette" &&
+      this.roulette.character?.key === characterKey;
+    if (verdict.achievement && !this.roulette.unlocked) {
+      const c = this.roulette.character;
+      this.roulette.unlocked = true;
+      logRoulette(this.sid, "achievement", { character: c.key, achievement: c.achievement.id });
+      // Toast can show immediately; the spoken reaction waits its turn.
+      this.sendJson({
+        type: "achievement",
+        id: c.achievement.id,
+        name: c.achievement.name,
+        character: c.name,
+      });
+      this.#queueAction(() => {
+        if (stillValid()) this.#startTurn(achievementPrompt(c), { speculative: false, systemEvent: true });
+      });
+    }
+    if (verdict.kick) {
+      this.#queueAction(() => {
+        if (stillValid()) this.endCall("kick", KICK_GOODBYE_PROMPT);
+      });
+    }
   }
 
   triggerInactivityNudge() {
@@ -572,6 +605,7 @@ class Session {
         this.sendJson({ type: "user_final", text: transcript });
         if (this.mode === "roulette") {
           logRoulette(this.sid, "user", { character: this.roulette.character?.key, text: transcript });
+          this.#judgeUserTurn(transcript);
         }
         if (this.turn && !this.turn.committed && this.turn.userText === transcript) {
           this.#commitTurn(sttMs, speechEndWall);
@@ -652,13 +686,9 @@ class Session {
         }
       }
       this.sendClear(); // flush queued playback everywhere
-    } else if (this.mode === "roulette") {
-      // Speculative rollback: any roulette state the discarded turn staged
-      // comes back, so the real turn can earn it again. (endCall never
-      // rides a speculative turn — callOver is only set at delivery.)
-      if (t.achievement) this.roulette.unlocked = false;
     }
     // Speculative turns roll back silently: no client messages, no history.
+    // (Judge verdicts don't ride turns, so there's nothing to roll back.)
   }
 
   #newTurn(userText, { speculative = false, spokenLine = false, systemEvent = false } = {}) {
@@ -675,7 +705,6 @@ class Session {
       spokenLine, // greeting: no LLM, no metrics
       systemEvent, // synthetic committed LLM turn; not attributed to the user
       endCall: null, // "kick" | "idle": the agent hangs up after this reply
-      achievement: false, // roulette: this reply unlocked the achievement
       outbox: [],
       // Latency bookkeeping (wall-clock ms)
       llmStartWall: Date.now(),
@@ -701,29 +730,6 @@ class Session {
       return characterSystemPrompt(this.roulette.character);
     }
     return systemPromptFor(this.personaId);
-  }
-
-  // A roulette directive surfaced mid-stream ([[kick]] / [[achievement]]),
-  // already stripped from the spoken text.
-  #onDirective(turn, name) {
-    if (this.mode !== "roulette") return;
-    const c = this.roulette.character;
-    if (name === "kick") {
-      // Never overwrite an existing reason: on an idle hang-up the model
-      // often (sensibly) appends [[kick]] to its goodbye — the turn is
-      // already ending, so the tag is a no-op.
-      turn.endCall = turn.endCall ?? "kick";
-    } else if (name === "achievement" && c && !this.roulette.unlocked) {
-      turn.achievement = true;
-      this.roulette.unlocked = true;
-      logRoulette(this.sid, "achievement", { character: c.key, achievement: c.achievement.id });
-      this.#deliver(turn, "json", {
-        type: "achievement",
-        id: c.achievement.id,
-        name: c.achievement.name,
-        character: c.name,
-      });
-    }
   }
 
   #openTurnPipeline(turn) {
@@ -800,14 +806,7 @@ class Session {
     turn.fish = this.#openTurnPipeline(turn);
 
     const chunker = new SentenceChunker();
-    let full = ""; // full reply text, for history (tags included — the model
-    // remembers it already used them; the filter keeps them out of the TTS)
-    // Directives only exist in roulette mode; personas speak unfiltered.
-    const filter = this.mode === "roulette"
-      ? new DirectiveFilter((name) => {
-          if (this.turn?.id === turn.id) this.#onDirective(turn, name);
-        })
-      : null;
+    let full = ""; // full reply text, for history
     const pushToFish = (text) => {
       if (!text) return;
       if (turn.firstTextPushWall === 0) turn.firstTextPushWall = Date.now();
@@ -817,8 +816,7 @@ class Session {
     const onText = (text) => {
       if (!text) return;
       full += text;
-      const clean = filter ? filter.push(text) : text;
-      for (const sentence of chunker.push(clean)) pushToFish(sentence);
+      for (const sentence of chunker.push(text)) pushToFish(sentence);
     };
 
     try {
@@ -836,9 +834,6 @@ class Session {
         },
       );
       if (!live()) return;
-      if (filter) {
-        for (const sentence of chunker.push(filter.flush())) pushToFish(sentence);
-      }
       pushToFish(chunker.flush());
       turn.fish.endInput();
       turn.inHistory = true;
@@ -868,6 +863,7 @@ class Session {
   destroy() {
     if (this.destroyed) return;
     this.destroyed = true;
+    this.pendingActions.length = 0;
     if (this.mode === "roulette") {
       logRoulette(this.sid, "session_end", { characters_met: this.roulette.seen.length });
     }
@@ -1081,7 +1077,7 @@ server.listen(PORT, () => {
   console.log(`  tts:  fish ${FISH_MODEL} latency=${FISH_LATENCY_MODE}`);
   console.log(`  personas: ${Object.keys(PERSONAS).join(", ")} | voices: ${Object.keys(VOICES).join(", ")}`);
   console.log(`  livekit mode (/lk): ${LK_ENABLED ? "enabled" : "disabled (set LIVEKIT_* env vars)"}`);
-  console.log(`  roulette (/roulette): enabled${TEXT_INPUT_ENABLED ? " (TEXT_INPUT dev mode ON)" : ""}`);
+  console.log(`  roulette (/roulette): enabled${TEXT_INPUT_ENABLED ? " (TEXT_INPUT dev mode ON)" : ""} | judge: ${judgeEnabled() ? (process.env.JUDGE_MODEL || "gpt-5.2") : "DISABLED (no OPENAI_API_KEY)"}`);
 });
 
 // The LiveKit agent worker is hosted on LiveKit Cloud (see Dockerfile +

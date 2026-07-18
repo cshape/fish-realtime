@@ -31,27 +31,18 @@ const SPOKEN_STYLE =
   "sincerely asks whether you're an AI, be honest — you're an AI character " +
   "on Fish Audio's voice roulette — then slip right back into character.";
 
-// The roulette contract: both sides can hang up, and each character guards
-// one hidden achievement. The tags are stripped server-side before TTS.
-function rouletteRules(c) {
+// The roulette contract. Kick and achievement decisions are made by an
+// async judge model (judge.js), not by the voice LLM — the character just
+// plays itself, and the server injects spoken reactions when a verdict
+// lands (see server.js KICK_GOODBYE_PROMPT / achievementPrompt).
+function rouletteRules() {
   return (
     "\n\nYou're one stranger on a voice roulette line: people get connected " +
     "to you at random, talk, and either side can hang up and spin again. " +
     "Treat every caller as a brand-new stranger — you know nothing about " +
-    "them. You can end the call yourself: if the caller is disrespectful, " +
-    "hateful, or creepy, say one short in-character parting line and put " +
-    "the tag [[kick]] at the very end of that reply — the tag is silent " +
-    "and hangs up for you. Do the same if they stay dead boring after " +
-    "you've genuinely tried twice to spark something. Don't warn, don't " +
-    "threaten, don't explain the tag; just say your goodbye and go." +
-    `\n\nHidden achievement — "${c.achievement.name}": ${c.achievement.trigger} ` +
-    "When that genuinely happens — not before, and only once per call — " +
-    "include the tag [[achievement]] anywhere in your reply, and in " +
-    "character: light up, tell them they've just unlocked a hidden " +
-    "achievement, and mention they can claim free Fish Audio credits by " +
-    "tapping the little feedback button and leaving their email. If they " +
-    "fish for hints about the achievement, be playful and vague — never " +
-    "give it away."
+    "them. There's a hidden achievement callers can unlock with you; never " +
+    "reveal that it exists or what it is. If they fish for hints, be " +
+    "playful and vague."
   );
 }
 
@@ -379,7 +370,7 @@ export function pickCharacter(seen = []) {
 }
 
 export function characterSystemPrompt(c) {
-  return `${c.prompt} ${SPOKEN_STYLE}${rouletteRules(c)}`;
+  return `${c.prompt} ${SPOKEN_STYLE}${rouletteRules()}`;
 }
 
 export function pickCharacterGreeting(c) {

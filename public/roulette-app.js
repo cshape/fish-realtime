@@ -31,6 +31,7 @@ const els = {
   veilTitle: $("veil-title"),
   veilSub: $("veil-sub"),
   cast: $("cast"),
+  achProgress: $("ach-progress"),
   toast: $("toast"),
   toastCam: $("toast-cam"),
   toastName: $("toast-name"),
@@ -129,6 +130,41 @@ function renderCharacter(c) {
   els.who.style.animation = "";
 }
 
+// --- achievement progress (per browser, survives sessions) -------------------
+
+const ACH_KEY = "fish-roulette-achievements";
+let castTotal = 0;
+
+function unlockedAchievements() {
+  try {
+    return JSON.parse(localStorage.getItem(ACH_KEY)) ?? {};
+  } catch {
+    return {};
+  }
+}
+
+function renderProgress(bump = false) {
+  const n = Object.keys(unlockedAchievements()).length;
+  if (!n || !castTotal) return;
+  els.achProgress.innerHTML = `<span class="star">✦</span> ${Math.min(n, castTotal)}/${castTotal} unlocked`;
+  els.achProgress.classList.remove("hidden");
+  if (bump) {
+    els.achProgress.classList.remove("bump");
+    void els.achProgress.offsetWidth;
+    els.achProgress.classList.add("bump");
+  }
+}
+
+function recordAchievement(id) {
+  const all = unlockedAchievements();
+  if (all[id]) return renderProgress();
+  all[id] = true;
+  try {
+    localStorage.setItem(ACH_KEY, JSON.stringify(all));
+  } catch {}
+  renderProgress(true);
+}
+
 let toastTimer = 0;
 function hideToast() {
   clearTimeout(toastTimer);
@@ -141,9 +177,7 @@ function showToast(name, characterName) {
   // (no half-overlap), and returns when the toast goes.
   els.who.classList.add("celebrating");
   els.toastName.textContent = `“${name}”`;
-  els.toastSub.textContent =
-    `${characterName} is impressed. Free Fish Audio credits are yours — ` +
-    "just leave an email to claim them.";
+  els.toastSub.textContent = `${characterName} is impressed. Leave an email to claim your free Fish credits.`;
   // The character's smiling face, if their art exists.
   els.toastCam.classList.add("missing");
   if (character) {
@@ -159,6 +193,8 @@ function showToast(name, characterName) {
 fetch("/cast.json")
   .then((r) => r.json())
   .then(({ cast }) => {
+    castTotal = cast.length;
+    renderProgress();
     for (const key of cast.sort(() => Math.random() - 0.5)) {
       const img = new Image();
       img.src = `/characters/${key}/f1.png`;
@@ -184,10 +220,10 @@ function openSheet(mode) {
     els.sheetTitle.textContent = "Claim your Fish credits";
     els.sheetSub.textContent =
       `You unlocked “${lastAchievement.name}” with ${lastAchievement.character}. ` +
-      "Leave your email and we'll send your credits. Thoughts welcome too.";
+      "Leave your email and we'll send your credits.";
   } else {
     els.sheetTitle.textContent = "Penny for your thoughts?";
-    els.sheetSub.textContent = "Tell us anything — what felt good, what felt off, who you'd talk to again.";
+    els.sheetSub.textContent = "What felt good? What felt off?";
   }
   els.sheetDone.classList.add("hidden");
   els.fbSend.disabled = false;
@@ -501,6 +537,7 @@ function handleEvent(msg) {
       lastAchievement = { id: msg.id, name: msg.name, character: msg.character };
       showToast(msg.name, msg.character);
       els.penny.classList.add("lit");
+      recordAchievement(msg.id);
       break;
 
     case "user_start":
