@@ -1,8 +1,8 @@
 // Pixel webcam portrait driver: swaps pre-generated frames on one <img> to
 // fake a live feed. Mouth follows the agent's audio level (energy-based
-// lipsync — no phoneme data needed); the smile frame can be flashed by the
-// app (achievements). Blink/away frames were cut from the art pipeline —
-// unknown roles simply fall back to neutral.
+// lipsync — no phoneme data needed). The smile frame is only used OUTSIDE
+// the live tile (the achievement toast) — freezing the tile on an
+// expression mid-speech breaks the lipsync illusion.
 //
 // Frames come from /characters/<key>/manifest.json (see gen-portraits.js);
 // load() resolves false when a character has no art yet so the caller can
@@ -15,10 +15,8 @@ export function createPortrait(img) {
   let current = null;
   let talking = false;
   let level = 0; // latest agent audio level (rms*4 from player-worklet)
-  let flashed = null; // temporary expression override ("smile")
   let generation = 0; // invalidates loops/loads across character switches
   let tickTimer = 0;
-  let flashTimer = 0;
 
   function show(role) {
     const frame = frames[role] ?? frames.neutral;
@@ -38,14 +36,12 @@ export function createPortrait(img) {
   }
 
   function tick() {
-    if (flashed) return show(flashed);
     show(talking ? mouthRole() : "neutral");
   }
 
   function stopLoops() {
     clearInterval(tickTimer);
-    clearTimeout(flashTimer);
-    tickTimer = flashTimer = 0;
+    tickTimer = 0;
   }
 
   return {
@@ -55,7 +51,6 @@ export function createPortrait(img) {
       stopLoops();
       frames = {};
       current = null;
-      flashed = null;
       level = 0;
       try {
         const res = await fetch(`/characters/${key}/manifest.json`, { cache: "no-store" });
@@ -92,25 +87,11 @@ export function createPortrait(img) {
       if (!on) level = 0;
     },
 
-    // Temporary expression (achievement smile).
-    flash(role, ms = 3000) {
-      const gen = generation;
-      flashed = role;
-      tick();
-      clearTimeout(flashTimer);
-      flashTimer = setTimeout(() => {
-        if (gen !== generation) return;
-        flashed = null;
-        tick();
-      }, ms);
-    },
-
     reset() {
       generation++;
       stopLoops();
       frames = {};
       current = null;
-      flashed = null;
     },
   };
 }

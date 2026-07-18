@@ -128,7 +128,16 @@ function renderCharacter(c) {
 }
 
 let toastTimer = 0;
+function hideToast() {
+  clearTimeout(toastTimer);
+  els.toast.classList.add("hidden");
+  els.who.classList.remove("celebrating");
+}
+
 function showToast(name, characterName) {
+  // The celebration takes the card's spot; the card steps aside entirely
+  // (no half-overlap), and returns when the toast goes.
+  els.who.classList.add("celebrating");
   els.toastName.textContent = `“${name}”`;
   els.toastSub.textContent =
     `${characterName} is impressed. Free Fish Audio credits are yours — ` +
@@ -141,7 +150,7 @@ function showToast(name, characterName) {
   }
   els.toast.classList.remove("hidden");
   clearTimeout(toastTimer);
-  toastTimer = setTimeout(() => els.toast.classList.add("hidden"), 18_000);
+  toastTimer = setTimeout(hideToast, 18_000);
 }
 
 // Landing teaser: the cast's faces, shuffled, no names.
@@ -455,10 +464,10 @@ function handleEvent(msg) {
       break;
 
     case "achievement":
+      // The toast shows the smiling frame; the live tile keeps lipsyncing.
       lastAchievement = { id: msg.id, name: msg.name, character: msg.character };
       showToast(msg.name, msg.character);
       els.penny.classList.add("lit");
-      portrait.flash("smile", 3500);
       break;
 
     case "user_start":
@@ -517,10 +526,10 @@ els.mute.onclick = () => { if (running || connecting) setMuted(!muted); };
 els.next.onclick = () => { if (running && !pendingKick) nextCharacter("skip"); };
 els.penny.onclick = () => openSheet(lastAchievement ? "claim" : "feedback");
 els.toastClaim.onclick = () => {
-  els.toast.classList.add("hidden");
+  hideToast();
   openSheet("claim");
 };
-els.toastLater.onclick = () => els.toast.classList.add("hidden");
+els.toastLater.onclick = hideToast;
 els.fbSend.onclick = sendFeedback;
 els.fbClose.onclick = closeSheet;
 els.sheet.onclick = (e) => { if (e.target === els.sheet) closeSheet(); };

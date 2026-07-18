@@ -136,6 +136,13 @@ body.session-fullscreen #hero { display: none; }
   to { transform: translateY(-2px); }
 }
 
+/* While the achievement celebration is up, the card yields the stage. */
+#who.celebrating {
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 320ms ease;
+}
+
 #who .who-name {
   font-size: 21px;
   font-weight: 620;
@@ -198,17 +205,19 @@ body.session-fullscreen #hero { display: none; }
 
 /* --- achievement celebration --------------------------------------------- */
 
+/* Centered over the character card (same anchor point), and larger than it,
+   so the unlock moment fully takes the stage instead of half-overlapping. */
 #toast {
   position: fixed;
-  top: calc(14px + env(safe-area-inset-top));
+  top: 45%;
   left: 50%;
   z-index: 9;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
   display: flex;
   align-items: center;
-  gap: 16px;
-  width: min(30rem, calc(100vw - 28px));
-  padding: 16px 20px;
+  gap: 20px;
+  width: min(36rem, calc(100vw - 24px));
+  padding: 26px 28px;
   border: 1px solid color-mix(in srgb, var(--tint) 40%, transparent);
   border-radius: calc(var(--radius) * 4);
   background:
@@ -240,12 +249,12 @@ body.session-fullscreen #hero { display: none; }
 }
 
 @keyframes toast-in {
-  0% { opacity: 0; transform: translate(-50%, -26px) scale(0.94); }
-  100% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+  0% { opacity: 0; transform: translate(-50%, calc(-50% - 22px)) scale(0.92); }
+  100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
 }
 
 #toast-cam {
-  width: 108px;
+  width: 150px;
   aspect-ratio: 4 / 3;
   flex: none;
   border-radius: calc(var(--radius) * 2.5);
@@ -271,7 +280,7 @@ body.session-fullscreen #hero { display: none; }
 }
 
 #toast-name {
-  font-size: 20px;
+  font-size: 26px;
   font-weight: 640;
   line-height: 1.15;
   color: var(--text);
@@ -358,7 +367,7 @@ body.session-fullscreen #hero { display: none; }
 }
 
 .sheet-panel {
-  width: min(26rem, 100%);
+  width: min(30rem, 100%);
   display: flex;
   flex-direction: column;
   gap: 10px;
@@ -466,7 +475,14 @@ body.session-fullscreen #hero { display: none; }
   #cast { flex-wrap: wrap; row-gap: 7px; max-width: 300px; margin-left: auto; margin-right: auto; }
   #cast img { width: 58px; }
   #cast img + img { margin-left: -11px; }
-  #toast { flex-direction: column; text-align: center; gap: 10px; }
+  #toast { flex-direction: column; text-align: center; gap: 12px; padding: 22px 20px; }
   .toast-body { align-items: center; }
   .toast-actions { justify-content: center; }
+  /* Centered pill reads better than a corner button on a narrow screen. */
+  #penny {
+    right: auto;
+    left: 50%;
+    transform: translateX(-50%);
+    width: max-content;
+  }
 }
