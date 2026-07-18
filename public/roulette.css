@@ -90,10 +90,10 @@ body.session-fullscreen #hero { display: none; }
 
 #who {
   position: fixed;
-  top: calc(64px + env(safe-area-inset-top));
+  top: 45%;
   left: 50%;
   z-index: 4;
-  transform: translateX(-50%);
+  transform: translate(-50%, -50%);
   display: flex;
   flex-direction: column;
   align-items: center;
@@ -110,8 +110,8 @@ body.session-fullscreen #hero { display: none; }
 }
 
 @keyframes who-in {
-  from { opacity: 0; transform: translate(-50%, -8px); }
-  to { opacity: 1; transform: translate(-50%, 0); }
+  from { opacity: 0; transform: translate(-50%, calc(-50% - 12px)); }
+  to { opacity: 1; transform: translate(-50%, -50%); }
 }
 
 /* The webcam bubble: pixel frames swapped by portrait.js. Hidden (text-only
@@ -459,10 +459,11 @@ body.session-fullscreen #hero { display: none; }
 /* --- small screens --------------------------------------------------------------------- */
 
 @media (max-width: 560px) {
-  #who { top: calc(56px + env(safe-area-inset-top)); padding: 11px 20px; }
+  #who { top: 42%; padding: 11px 20px; }
   #who .who-name { font-size: 18px; }
   #penny { bottom: calc(86px + env(safe-area-inset-bottom)); }
   #typed { bottom: calc(150px + env(safe-area-inset-bottom)); }
+  #cast { flex-wrap: wrap; row-gap: 7px; max-width: 300px; margin-left: auto; margin-right: auto; }
   #cast img { width: 58px; }
   #cast img + img { margin-left: -11px; }
   #toast { flex-direction: column; text-align: center; gap: 10px; }
