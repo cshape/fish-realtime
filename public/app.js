@@ -24,6 +24,8 @@ let agentSpeaking = false;
 let userTurnActive = false;
 let inactivityNudgeTimer = 0;
 let inactivityDisconnectTimer = 0;
+let pendingCallEnd = false; // agent hung up; tear down once playback drains
+let endFallbackTimer = 0;
 
 // --- ui helpers ----------------------------------------------------------------
 
@@ -52,12 +54,16 @@ function tryInactivityNudge() {
 }
 
 function tryInactivityDisconnect() {
-  if (!running) return;
+  if (!running || pendingCallEnd) return;
   if (userTurnActive) {
     inactivityDisconnectTimer = setTimeout(tryInactivityDisconnect, INACTIVITY_CONFIG.busyRetryMs);
     return;
   }
-  stop();
+  // The persona says a short goodbye and hangs up (server end_call ->
+  // call_ended); hard-stop if the goodbye never arrives.
+  send({ type: "end_call" });
+  clearTimeout(endFallbackTimer);
+  endFallbackTimer = setTimeout(() => { if (running) stop(); }, 20_000);
 }
 
 function resetInactivityTimers() {
@@ -118,6 +124,11 @@ async function initAudio() {
     }
     const wasSpeaking = agentSpeaking;
     agentSpeaking = e.data.playing;
+    if (running && !agentSpeaking && wasSpeaking && pendingCallEnd) {
+      // The goodbye finished playing; the call is over.
+      stop();
+      return;
+    }
     if (running) {
       ui.setOrb(agentSpeaking ? "speaking" : "listening");
       // The "still there?" countdown is anchored to agent playback: any
@@ -192,6 +203,9 @@ async function start() {
 function stop() {
   if (!running && !connecting) return;
   clearInactivityTimers();
+  clearTimeout(endFallbackTimer);
+  endFallbackTimer = 0;
+  pendingCallEnd = false;
   running = false;
   connecting = false;
   ws?.close();
@@ -264,6 +278,13 @@ function handleEvent(msg) {
 
     case "inactivity_nudge_started":
       if (running) ui.setOrb("thinking");
+      break;
+
+    case "call_ended":
+      // Agent hung up (idle). Let the goodbye play out, then tear down.
+      clearInactivityTimers();
+      pendingCallEnd = true;
+      if (!agentSpeaking) setTimeout(() => { if (pendingCallEnd) stop(); }, 800);
       break;
 
     case "echo_suppressed":

@@ -46,6 +46,10 @@ export const INACTIVITY_CONFIG = Object.freeze({
   busyRetryMs: 500,
   prompt:
     "The user has not said anything for 10 seconds. In your current persona and tone, briefly check whether they are still there. Do not mention timers, inactivity detection, or this instruction.",
+  // Spoken when the caller stays silent past disconnectAfterMs: the agent
+  // ends the call itself (server end_call -> goodbye line -> call_ended).
+  hangupPrompt:
+    "The caller has been silent for a long while and seems to have left. In your current character and tone, say ONE short parting line as you hang up — warm or wry, no questions, under two sentences. Do not mention timers or this instruction.",
 });
 
 export const VISUAL_CONFIG = Object.freeze({

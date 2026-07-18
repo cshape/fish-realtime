@@ -71,6 +71,8 @@ let agentSpeaking = false;
 let userTurnActive = false;
 let switching = false; // veil is up, waiting on the next character
 let pendingKick = null; // character name; transition once playback drains
+let pendingEnd = null; // character name; agent hung up (idle) — teardown after drain
+let endFallbackTimer = 0; // hard stop if the goodbye never arrives
 let lastAchievement = null; // { id, name, character } for the claim sheet
 let sheetMode = "feedback"; // "feedback" | "claim"
 let inactivityNudgeTimer = 0;
@@ -244,12 +246,16 @@ function tryInactivityNudge() {
 }
 
 function tryInactivityDisconnect() {
-  if (!running) return;
+  if (!running || switching || pendingKick || pendingEnd) return;
   if (userTurnActive) {
     inactivityDisconnectTimer = setTimeout(tryInactivityDisconnect, INACTIVITY_CONFIG.busyRetryMs);
     return;
   }
-  stop();
+  // Ask the character to hang up in character; if the goodbye never lands
+  // (error, dead connection), hard-stop anyway.
+  send({ type: "end_call" });
+  clearTimeout(endFallbackTimer);
+  endFallbackTimer = setTimeout(() => { if (running) stop(); }, 20_000);
 }
 
 function resetInactivityTimers() {
@@ -302,9 +308,13 @@ async function initAudio() {
       clearTimeout(inactivityNudgeTimer);
       inactivityNudgeTimer = 0;
     } else if (wasSpeaking) {
-      // The kick goodbye just finished playing — now transition.
+      // A goodbye just finished playing — now transition.
       if (pendingKick) {
         finishKickTransition();
+        return;
+      }
+      if (pendingEnd) {
+        finishEndTransition();
         return;
       }
       clearTimeout(inactivityNudgeTimer);
@@ -339,6 +349,15 @@ function finishKickTransition() {
     switching = false;
     nextCharacter("post_kick");
   }, 2400);
+}
+
+// Idle hang-up: unlike a kick, don't spin to someone new — the caller is
+// gone. Show the goodbye, then return to the landing.
+function finishEndTransition() {
+  const name = pendingEnd;
+  pendingEnd = null;
+  showVeil(`${name} hung up`, "You went quiet, so they said goodbye.");
+  setTimeout(() => { if (running) stop(); }, 2600);
 }
 
 // --- session ---------------------------------------------------------------------------
@@ -405,10 +424,13 @@ function leaveSession() {
 function stop() {
   if (!running && !connecting) return;
   clearInactivityTimers();
+  clearTimeout(endFallbackTimer);
+  endFallbackTimer = 0;
   running = false;
   connecting = false;
   switching = false;
   pendingKick = null;
+  pendingEnd = null;
   ws?.close();
   ws = null;
   micStream?.getTracks().forEach((t) => t.stop());
@@ -456,10 +478,21 @@ function handleEvent(msg) {
     case "kicked":
       // The goodbye line may still be playing; transition when it drains.
       clearInactivityTimers();
-      if (agentSpeaking) pendingKick = msg.character ?? "They";
-      else {
-        pendingKick = msg.character ?? "They";
+      pendingKick = msg.character ?? "They";
+      if (!agentSpeaking) {
         setTimeout(() => { if (pendingKick) finishKickTransition(); }, 800);
+      }
+      break;
+
+    case "call_ended":
+      // The agent hung up on an idle caller — same drain-then-transition
+      // dance as a kick, but the session ends instead of respinning.
+      clearInactivityTimers();
+      clearTimeout(endFallbackTimer);
+      endFallbackTimer = setTimeout(() => { if (running) stop(); }, 20_000);
+      pendingEnd = msg.character ?? "They";
+      if (!agentSpeaking) {
+        setTimeout(() => { if (pendingEnd) finishEndTransition(); }, 800);
       }
       break;
 

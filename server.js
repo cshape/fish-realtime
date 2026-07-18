@@ -274,7 +274,10 @@ class Session {
     this.personaId = DEFAULT_PERSONA;
     // "persona" (the curated demo) or "roulette" (random character line).
     this.mode = "persona";
-    this.roulette = null; // { seen, character, unlocked, kicked }
+    this.roulette = null; // { seen, character, unlocked }
+    // The agent hung up (kick or idle): the line is dead — no barge-in, no
+    // new turns. Roulette revives it with the next character.
+    this.callOver = false;
     this.destroyed = false;
     // Wall time of the last mic chunk with speech-level energy. Flux's
     // TurnInfo events have no word timings (audio_window_end just tracks how
@@ -304,6 +307,7 @@ class Session {
   // persona knows what was said — but swaps prompt and voice, and greets.
   setPersona(id) {
     if (!isPersona(id)) return;
+    this.callOver = false; // picking a persona revives a hung-up line
     this.personaId = id;
     this.sendJson({ type: "persona", persona: id });
     if (this.turn) this.#cancelTurn();
@@ -316,7 +320,7 @@ class Session {
   startRoulette() {
     if (this.mode === "roulette") return;
     this.mode = "roulette";
-    this.roulette = { seen: [], character: null, unlocked: false, kicked: false };
+    this.roulette = { seen: [], character: null, unlocked: false };
     logRoulette(this.sid, "session_start");
     this.nextCharacter("start");
   }
@@ -327,14 +331,14 @@ class Session {
   nextCharacter(reason) {
     if (this.mode !== "roulette") return;
     const r = this.roulette;
-    if (reason === "skip" && r.character && !r.kicked) {
+    if (reason === "skip" && r.character && !this.callOver) {
       logRoulette(this.sid, "skip", { character: r.character.key });
     }
     if (this.turn) this.#cancelTurn();
     this.sendClear();
     this.history = [];
     r.unlocked = false;
-    r.kicked = false;
+    this.callOver = false;
     const c = pickCharacter(r.seen);
     r.character = c;
     r.seen.push(c.key);
@@ -349,7 +353,7 @@ class Session {
   // with this transcript. Lets characters be tested without a microphone.
   onTextInput(text) {
     if (!text) return;
-    if (this.mode === "roulette" && this.roulette.kicked) return;
+    if (this.callOver) return;
     if (this.turn) this.#cancelTurn();
     this.sendClear();
     this.sendJson({ type: "user_final", text });
@@ -360,8 +364,20 @@ class Session {
     this.#commitTurn(0, Date.now());
   }
 
+  // The agent hangs up on its own (idle caller): one short in-character
+  // parting line via a system-event turn, then the line goes dead. Shared
+  // by roulette characters and the persona demo — the client just sends
+  // {type:"end_call"} and reacts to {type:"call_ended"}.
+  endCall(reason = "idle") {
+    if (this.callOver || this.turn?.endCall) return;
+    if (this.turn) this.#cancelTurn();
+    this.sendClear();
+    this.#startTurn(INACTIVITY_CONFIG.hangupPrompt, { speculative: false, systemEvent: true });
+    if (this.turn) this.turn.endCall = reason;
+  }
+
   triggerInactivityNudge() {
-    if (this.mode === "roulette" && this.roulette.kicked) return;
+    if (this.callOver) return;
     // Never interrupt an active turn. The browser retries this narrow command
     // while preserving the original 30-second disconnect deadline.
     if (this.turn || this.agentAudible()) {
@@ -483,10 +499,10 @@ class Session {
   }
 
   #onTurnInfo(msg) {
-    // After a kick, the line is dead: the character said goodbye and hung
-    // up. No barge-in (the goodbye plays out), no new turns — the client
-    // moves on with roulette_next.
-    if (this.mode === "roulette" && (this.roulette.kicked || this.turn?.kick)) return;
+    // Once the agent hung up (or its goodbye is in flight), the line is
+    // dead: no barge-in (the goodbye plays out), no new turns. The client
+    // moves on (roulette_next) or tears down (call_ended).
+    if (this.callOver || this.turn?.endCall) return;
     const transcript = (msg.transcript || "").trim();
     switch (msg.event) {
       case "StartOfTurn":
@@ -638,9 +654,9 @@ class Session {
       this.sendClear(); // flush queued playback everywhere
     } else if (this.mode === "roulette") {
       // Speculative rollback: any roulette state the discarded turn staged
-      // comes back, so the real turn can earn it again.
+      // comes back, so the real turn can earn it again. (endCall never
+      // rides a speculative turn — callOver is only set at delivery.)
       if (t.achievement) this.roulette.unlocked = false;
-      if (t.kick) this.roulette.kicked = false;
     }
     // Speculative turns roll back silently: no client messages, no history.
   }
@@ -658,7 +674,7 @@ class Session {
       eager: speculative,
       spokenLine, // greeting: no LLM, no metrics
       systemEvent, // synthetic committed LLM turn; not attributed to the user
-      kick: false, // roulette: this reply ends with the character hanging up
+      endCall: null, // "kick" | "idle": the agent hangs up after this reply
       achievement: false, // roulette: this reply unlocked the achievement
       outbox: [],
       // Latency bookkeeping (wall-clock ms)
@@ -693,7 +709,10 @@ class Session {
     if (this.mode !== "roulette") return;
     const c = this.roulette.character;
     if (name === "kick") {
-      turn.kick = true;
+      // Never overwrite an existing reason: on an idle hang-up the model
+      // often (sensibly) appends [[kick]] to its goodbye — the turn is
+      // already ending, so the tag is a no-op.
+      turn.endCall = turn.endCall ?? "kick";
     } else if (name === "achievement" && c && !this.roulette.unlocked) {
       turn.achievement = true;
       this.roulette.unlocked = true;
@@ -718,12 +737,24 @@ class Session {
         if (this.turn?.id !== turn.id) return;
         turn.finished = true;
         this.#deliver(turn, "json", { type: "agent_done" });
-        if (turn.kick && this.mode === "roulette") {
+        if (turn.endCall) {
           // The goodbye is fully synthesized; hang up. The client waits for
-          // playback to drain before moving on.
-          this.roulette.kicked = true;
-          logRoulette(this.sid, "kick", { character: this.roulette.character?.key });
-          this.#deliver(turn, "json", { type: "kicked", character: this.roulette.character?.name ?? null });
+          // playback to drain before moving on / tearing down.
+          this.callOver = true;
+          const c = this.mode === "roulette" ? this.roulette.character : null;
+          if (this.mode === "roulette") {
+            logRoulette(this.sid, turn.endCall === "kick" ? "kick" : "call_ended", {
+              character: c?.key,
+              reason: turn.endCall,
+            });
+          }
+          this.#deliver(
+            turn,
+            "json",
+            turn.endCall === "kick"
+              ? { type: "kicked", character: c?.name ?? null }
+              : { type: "call_ended", reason: turn.endCall, character: c?.name ?? null },
+          );
         }
         if (turn.committed) this.turn = null;
       },
@@ -1028,6 +1059,8 @@ server.on("upgrade", (req, socket, head) => {
           session.startRoulette();
         } else if (msg.type === "roulette_next") {
           session.nextCharacter(msg.reason === "post_kick" ? "post_kick" : "skip");
+        } else if (msg.type === "end_call") {
+          session.endCall("idle");
         } else if (msg.type === "text_input" && TEXT_INPUT_ENABLED) {
           session.onTextInput(String(msg.text ?? "").slice(0, 500).trim());
         }
