@@ -1,0 +1,45 @@
+# fish-realtime — Render Blueprint.
+#
+# One Node web service: static pages (/, /roulette, review pages), the /ws
+# audio websocket, /feedback, and token minting for /lk. WebSockets work on
+# all Render tiers; free tier idles after 15 min (cold start kills the
+# first-visit experience — use Starter for a real test).
+#
+# If a fish-realtime service already exists in the dashboard, keep the name
+# below in sync with it so a Blueprint sync adopts it instead of duplicating.
+#
+# Deploy: Render Dashboard -> Blueprints -> New Blueprint Instance -> this
+# repo. Set the prompted env vars (values are in local .env). Do NOT set
+# TEXT_INPUT in production — it enables typed turn injection (dev only).
+#
+# Data: data/*.jsonl lives on the instance disk, which is EPHEMERAL — wiped
+# on every deploy/restart. Every event is therefore mirrored to stdout
+# (datalog.js keys off RENDER), so the durable copy is the Render log
+# stream. Export logs before they rotate out, or attach a persistent disk
+# later if the test outgrows this.
+
+services:
+  - type: web
+    name: fish-realtime
+    runtime: node
+    plan: starter
+    buildCommand: npm ci --omit=dev
+    startCommand: node server.js
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: DEEPGRAM_API_KEY
+        sync: false
+      - key: LLM_BASE_URL
+        sync: false
+      - key: LLM_API_KEY
+        sync: false
+      - key: FISH_API_KEY
+        sync: false
+      # Optional: enables /lk (LiveKit mode). Roulette doesn't need these.
+      - key: LIVEKIT_URL
+        sync: false
+      - key: LIVEKIT_API_KEY
+        sync: false
+      - key: LIVEKIT_API_SECRET
+        sync: false
