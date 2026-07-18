@@ -1,0 +1,95 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>portrait review</title>
+  <style>
+    body {
+      margin: 0;
+      padding: 28px 20px 60px;
+      background: #16130f;
+      color: #e8e2d8;
+      font: 14px/1.5 ui-monospace, monospace;
+    }
+    h1 { font-size: 18px; font-weight: 600; margin: 0 0 4px; }
+    #meta { color: #8f877a; font-size: 12px; margin-bottom: 24px; }
+    .char { margin-bottom: 36px; }
+    .char h2 {
+      font-size: 15px;
+      font-weight: 600;
+      margin: 0 0 10px;
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+    }
+    .char h2 a { color: #6f9c6f; font-size: 12px; text-decoration: none; }
+    .char h2 a:hover { text-decoration: underline; }
+    .frames { display: flex; flex-wrap: wrap; gap: 10px; }
+    figure { margin: 0; }
+    figure img {
+      width: 240px;
+      aspect-ratio: 4 / 3;
+      image-rendering: pixelated;
+      border-radius: 6px;
+      display: block;
+      background: #000;
+    }
+    figcaption { font-size: 11px; color: #8f877a; margin-top: 4px; }
+    .pending { color: #8f877a; font-style: italic; }
+  </style>
+</head>
+<body>
+  <h1>portrait review</h1>
+  <div id="meta"></div>
+  <div id="gallery"></div>
+
+  <script type="module">
+    const KEYS = ["rosa", "earl", "maddie", "jojo", "viktor", "dex", "priya", "agnes", "tunde", "colette"];
+    const ORDER = ["neutral", "mouthSlight", "mouthOpen", "mouthWide", "mouthRound", "smile"];
+    const gallery = document.getElementById("gallery");
+    const meta = document.getElementById("meta");
+
+    async function render() {
+      const results = await Promise.all(
+        KEYS.map(async (key) => {
+          try {
+            const r = await fetch(`/characters/${key}/manifest.json`, { cache: "no-store" });
+            return r.ok ? { key, manifest: await r.json() } : { key };
+          } catch {
+            return { key };
+          }
+        }),
+      );
+      const done = results.filter((r) => r.manifest);
+      meta.textContent = `${done.length}/${KEYS.length} characters generated — page refreshes automatically`;
+      gallery.innerHTML = "";
+      for (const { key, manifest } of results) {
+        const div = document.createElement("div");
+        div.className = "char";
+        if (!manifest) {
+          div.innerHTML = `<h2>${key}</h2><span class="pending">not generated yet…</span>`;
+          gallery.appendChild(div);
+          continue;
+        }
+        const bust = Date.now(); // frames can be rewritten by re-runs
+        div.innerHTML =
+          `<h2>${key} <a href="/portrait-test.html?c=${key}">animate ▸</a></h2>` +
+          `<div class="frames">` +
+          ORDER.filter((role) => manifest.frames[role])
+            .map(
+              (role) =>
+                `<figure><img loading="lazy" src="/characters/${key}/${manifest.frames[role]}?${bust}" alt="" />` +
+                `<figcaption>${role}</figcaption></figure>`,
+            )
+            .join("") +
+          `</div>`;
+        gallery.appendChild(div);
+      }
+    }
+
+    render();
+    setInterval(render, 30_000);
+  </script>
+</body>
+</html>

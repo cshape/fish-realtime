@@ -1,0 +1,15 @@
+{
+  "key": "viktor",
+  "size": [
+    160,
+    120
+  ],
+  "frames": {
+    "neutral": "f1.png",
+    "mouthSlight": "f2.png",
+    "mouthOpen": "f3.png",
+    "mouthWide": "f4.png",
+    "mouthRound": "f5.png",
+    "smile": "f7.png"
+  }
+}

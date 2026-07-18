@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>portrait test</title>
+  <style>
+    body {
+      margin: 0;
+      min-height: 100vh;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      gap: 18px;
+      background: #16130f;
+      color: #e8e2d8;
+      font: 14px/1.5 ui-monospace, monospace;
+    }
+    #tile {
+      position: relative;
+      width: 640px;
+      height: 480px;
+      border-radius: 10px;
+      overflow: hidden;
+      box-shadow: 0 30px 80px -30px rgba(0, 0, 0, 0.9);
+      background: #000;
+    }
+    #tile img {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      image-rendering: pixelated;
+      display: none;
+    }
+    #tile img.on { display: block; }
+    #overlay {
+      position: absolute;
+      left: 10px;
+      bottom: 10px;
+      padding: 4px 10px;
+      background: rgba(0, 0, 0, 0.55);
+      border-radius: 4px;
+      font-size: 13px;
+    }
+    #rec {
+      position: absolute;
+      top: 10px;
+      right: 12px;
+      font-size: 12px;
+      color: #ff5a52;
+    }
+    #rec::before { content: "● "; }
+    .row { display: flex; gap: 8px; flex-wrap: wrap; justify-content: center; max-width: 660px; }
+    button {
+      padding: 8px 14px;
+      border: 1px solid #4a443b;
+      border-radius: 6px;
+      background: #241f19;
+      color: inherit;
+      font: inherit;
+      cursor: pointer;
+    }
+    button.on { background: #4a6b4a; border-color: #6f9c6f; }
+    #status { color: #8f877a; font-size: 12px; }
+  </style>
+</head>
+<body>
+  <div id="tile">
+    <div id="overlay"></div>
+    <span id="rec">LIVE</span>
+  </div>
+  <div class="row" id="frames"></div>
+  <div class="row">
+    <button id="talk">Talk</button>
+    <button id="autoblink" class="on">Auto-blink</button>
+  </div>
+  <div id="status"></div>
+
+  <script type="module">
+    const key = new URLSearchParams(location.search).get("c") || "rosa";
+    const tile = document.getElementById("tile");
+    const framesRow = document.getElementById("frames");
+    const status = document.getElementById("status");
+    document.getElementById("overlay").textContent = key;
+
+    const manifest = await fetch(`/characters/${key}/manifest.json`).then((r) => {
+      if (!r.ok) throw new Error("no manifest — run: npm run portraits -- " + key);
+      return r.json();
+    }).catch((e) => { status.textContent = e.message; throw e; });
+
+    const imgs = {};
+    for (const [role, file] of Object.entries(manifest.frames)) {
+      const img = new Image();
+      img.src = `/characters/${key}/${file}`;
+      tile.prepend(img);
+      imgs[role] = img;
+      const b = document.createElement("button");
+      b.textContent = role;
+      b.onclick = () => { talking = false; talkBtn.classList.remove("on"); show(role); };
+      framesRow.appendChild(b);
+    }
+    status.textContent = `${key}: ${Object.keys(imgs).length} frames @ ${manifest.size.join("x")}`;
+
+    let current = null;
+    function show(role) {
+      if (!imgs[role] || role === current) return;
+      for (const img of Object.values(imgs)) img.classList.remove("on");
+      imgs[role].classList.add("on");
+      current = role;
+    }
+    show("neutral");
+
+    // --- fake lipsync driver (same bucket logic the real tile will use) ---
+    let talking = false;
+    let level = 0;
+    const MOUTHS = ["mouthSlight", "mouthOpen", "mouthWide"];
+    setInterval(() => {
+      if (!talking) return;
+      // random speech-ish envelope
+      level = Math.max(0, Math.min(1, level + (Math.random() - 0.45) * 0.55));
+      let role;
+      if (level < 0.12) role = "neutral";
+      else if (Math.random() < 0.18 && imgs.mouthRound) role = "mouthRound";
+      else role = MOUTHS[Math.min(2, Math.floor(level * 3))] ?? "mouthOpen";
+      show(role);
+    }, 90);
+
+    // --- blinks ---
+    const blinkBtn = document.getElementById("autoblink");
+    (function blinkLoop() {
+      setTimeout(() => {
+        if (blinkBtn.classList.contains("on") && imgs.blink) {
+          const prev = current;
+          show("blink");
+          setTimeout(() => show(talking ? prev : "neutral"), 130);
+        }
+        blinkLoop();
+      }, 2800 + Math.random() * 3500);
+    })();
+
+    const talkBtn = document.getElementById("talk");
+    talkBtn.onclick = () => {
+      talking = !talking;
+      talkBtn.classList.toggle("on", talking);
+      if (!talking) show("neutral");
+    };
+    blinkBtn.onclick = () => blinkBtn.classList.toggle("on");
+  </script>
+</body>
+</html>

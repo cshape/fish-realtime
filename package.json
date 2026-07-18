@@ -4,7 +4,11 @@
   "type": "module",
   "scripts": {
     "start": "node --env-file=.env server.js",
+    "start:dev": "TEXT_INPUT=1 node --env-file=.env server.js",
     "smoke": "node --env-file=.env scripts/smoke.js",
+    "smoke:roulette": "node scripts/roulette-smoke.js",
+    "probe:roulette": "node scripts/roulette-probe.js",
+    "portraits": "node --env-file=.env scripts/gen-portraits.js",
     "postinstall": "patch-package"
   },
   "dependencies": {
@@ -16,5 +20,8 @@
     "livekit-server-sdk": "^2.17.0",
     "patch-package": "^8.0.1",
     "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "sharp": "^0.35.3"
   }
 }
