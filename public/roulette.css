@@ -1,0 +1,471 @@
+/* fish-roulette — layers on styles.css: idle hero, character card, skip
+   button, kick/skip veil, achievement toast, and the slowly surfacing
+   "penny for your thoughts" button. */
+
+/* --- idle hero ------------------------------------------------------------ */
+
+body.ru-idle #dock,
+body.ru-idle #who,
+body.ru-idle #typed {
+  display: none;
+}
+
+#hero {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 18px;
+  text-align: center;
+  padding: 0 18px 8vh;
+}
+
+#hero h1 {
+  margin: 0;
+  font-size: clamp(40px, 7vw, 68px);
+  font-weight: 260;
+  letter-spacing: -0.02em;
+  color: var(--text);
+}
+
+.hero-sub {
+  max-width: 30rem;
+  margin: 0;
+  color: var(--text-dim);
+  font-size: 15px;
+  line-height: 1.6;
+}
+
+/* The cast: a fanned strip of pixel faces, no names — a teaser, not a menu. */
+#cast {
+  display: flex;
+  justify-content: center;
+  margin: 6px 0 2px;
+}
+
+#cast img {
+  width: 76px;
+  aspect-ratio: 4 / 3;
+  border-radius: 8px;
+  border: 1px solid rgba(255, 255, 255, 0.65);
+  image-rendering: pixelated;
+  box-shadow: 0 10px 26px -14px rgba(15, 14, 13, 0.6);
+  background: #000;
+  transition: transform 200ms ease;
+}
+
+#cast img + img { margin-left: -14px; }
+#cast img:nth-child(odd) { transform: rotate(-2.4deg); }
+#cast img:nth-child(even) { transform: rotate(2deg) translateY(3px); }
+#cast img:hover { transform: rotate(0deg) translateY(-6px) scale(1.5); z-index: 2; position: relative; }
+
+#start {
+  margin-top: 10px;
+  padding: 16px 34px;
+  border: 1px solid rgba(15, 14, 13, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--text);
+  font: 650 15px/1 var(--font);
+  cursor: pointer;
+  box-shadow: 0 16px 40px -26px rgba(15, 14, 13, 0.72), 0 1px 0 rgba(255, 255, 255, 0.92) inset;
+  backdrop-filter: blur(20px) saturate(1.35);
+  -webkit-backdrop-filter: blur(20px) saturate(1.35);
+  transition: transform 180ms ease, border-color 180ms ease;
+}
+#start:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--tint) 40%, var(--gray-300)); }
+#start:active { transform: translateY(0) scale(0.97); }
+
+.hero-fine {
+  margin: 4px 0 0;
+  color: var(--text-dim);
+  font-size: 11px;
+  opacity: 0.75;
+}
+
+body.session-fullscreen #hero { display: none; }
+
+/* --- who card ------------------------------------------------------------- */
+
+#who {
+  position: fixed;
+  top: calc(64px + env(safe-area-inset-top));
+  left: 50%;
+  z-index: 4;
+  transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 3px;
+  padding: 14px 26px;
+  border: 1px solid color-mix(in srgb, var(--tint) 22%, transparent);
+  border-radius: calc(var(--radius) * 4);
+  background: linear-gradient(180deg, color-mix(in srgb, var(--tint) 9%, white), rgba(255, 255, 255, 0.6));
+  box-shadow: 0 14px 38px -28px var(--tint), 0 1px 0 rgba(255, 255, 255, 0.72) inset;
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  text-align: center;
+  animation: who-in 480ms cubic-bezier(0.2, 0.9, 0.25, 1);
+}
+
+@keyframes who-in {
+  from { opacity: 0; transform: translate(-50%, -8px); }
+  to { opacity: 1; transform: translate(-50%, 0); }
+}
+
+/* The webcam bubble: pixel frames swapped by portrait.js. Hidden (text-only
+   card) for characters without generated art. */
+#who-cam {
+  width: min(360px, 62vw);
+  aspect-ratio: 4 / 3;
+  margin-bottom: 8px;
+  border-radius: calc(var(--radius) * 3);
+  border: 1px solid color-mix(in srgb, var(--tint) 30%, transparent);
+  image-rendering: pixelated;
+  background: #000;
+  box-shadow: 0 18px 44px -30px var(--tint);
+}
+
+#who-cam.talking {
+  animation: cam-bob 460ms ease-in-out infinite alternate;
+}
+
+@keyframes cam-bob {
+  from { transform: translateY(0); }
+  to { transform: translateY(-2px); }
+}
+
+#who .who-name {
+  font-size: 21px;
+  font-weight: 620;
+  color: var(--text);
+  line-height: 1.1;
+}
+
+#who .who-meta {
+  font-size: 11px;
+  color: var(--text-dim);
+}
+
+#who .who-tag {
+  font-size: 12px;
+  color: var(--text-dim);
+  font-weight: 520;
+}
+
+/* --- dock: next button ------------------------------------------------------ */
+
+#next { width: auto; min-width: 94px; order: 3; }
+
+/* --- veil (connecting / skipped / kicked) ----------------------------------- */
+
+#veil {
+  position: fixed;
+  inset: 0;
+  z-index: 8;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: color-mix(in srgb, var(--surface-app) 55%, transparent);
+  backdrop-filter: blur(18px) saturate(1.1);
+  -webkit-backdrop-filter: blur(18px) saturate(1.1);
+  opacity: 1;
+  transition: opacity 320ms ease;
+}
+#veil.off { opacity: 0; pointer-events: none; }
+
+.veil-inner {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+  padding: 0 24px;
+}
+
+#veil-title {
+  font-size: clamp(22px, 4vw, 30px);
+  font-weight: 300;
+  letter-spacing: -0.01em;
+  color: var(--text);
+}
+
+#veil-sub {
+  font-size: 13px;
+  color: var(--text-dim);
+}
+
+/* --- achievement celebration --------------------------------------------- */
+
+#toast {
+  position: fixed;
+  top: calc(14px + env(safe-area-inset-top));
+  left: 50%;
+  z-index: 9;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  width: min(30rem, calc(100vw - 28px));
+  padding: 16px 20px;
+  border: 1px solid color-mix(in srgb, var(--tint) 40%, transparent);
+  border-radius: calc(var(--radius) * 4);
+  background:
+    linear-gradient(120deg, color-mix(in srgb, var(--tint) 16%, white), rgba(255, 255, 255, 0.92) 55%),
+    white;
+  box-shadow:
+    0 26px 70px -28px var(--tint),
+    0 1px 0 rgba(255, 255, 255, 0.85) inset;
+  backdrop-filter: blur(14px) saturate(1.2);
+  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  animation: toast-in 640ms cubic-bezier(0.18, 1.25, 0.3, 1);
+}
+
+/* Twinkles: pure CSS, no assets. */
+#toast::before,
+#toast::after {
+  content: "✦";
+  position: absolute;
+  color: color-mix(in srgb, var(--tint) 85%, white);
+  animation: twinkle 1.6s ease-in-out infinite;
+  pointer-events: none;
+}
+#toast::before { top: -9px; left: 22px; font-size: 15px; }
+#toast::after { bottom: -7px; right: 30px; font-size: 11px; animation-delay: 0.55s; }
+
+@keyframes twinkle {
+  0%, 100% { opacity: 0.25; transform: scale(0.8) rotate(-8deg); }
+  50% { opacity: 1; transform: scale(1.15) rotate(8deg); }
+}
+
+@keyframes toast-in {
+  0% { opacity: 0; transform: translate(-50%, -26px) scale(0.94); }
+  100% { opacity: 1; transform: translate(-50%, 0) scale(1); }
+}
+
+#toast-cam {
+  width: 108px;
+  aspect-ratio: 4 / 3;
+  flex: none;
+  border-radius: calc(var(--radius) * 2.5);
+  border: 1px solid color-mix(in srgb, var(--tint) 35%, transparent);
+  image-rendering: pixelated;
+  background: #000;
+}
+#toast-cam.missing { display: none; }
+
+.toast-body {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  min-width: 0;
+}
+
+.toast-kicker {
+  font-size: 10px;
+  font-weight: 650;
+  text-transform: uppercase;
+  letter-spacing: 0.09em;
+  color: color-mix(in srgb, var(--tint) 80%, var(--text));
+}
+
+#toast-name {
+  font-size: 20px;
+  font-weight: 640;
+  line-height: 1.15;
+  color: var(--text);
+}
+
+#toast-sub {
+  font-size: 12.5px;
+  line-height: 1.45;
+  color: var(--text-dim);
+}
+
+.toast-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+#toast-claim {
+  padding: 9px 18px;
+  border: none;
+  border-radius: 999px;
+  background: var(--tint);
+  color: white;
+  font: 650 12.5px/1 var(--font);
+  cursor: pointer;
+  box-shadow: 0 10px 24px -14px var(--tint);
+  transition: transform 160ms ease;
+}
+#toast-claim:hover { transform: translateY(-1px); }
+
+#toast-later {
+  padding: 9px 6px;
+  border: none;
+  background: none;
+  color: var(--text-dim);
+  font: 550 12px/1 var(--font);
+  cursor: pointer;
+}
+#toast-later:hover { color: var(--text); }
+
+/* --- penny for your thoughts --------------------------------------------------- */
+
+#penny {
+  position: fixed;
+  right: calc(16px + env(safe-area-inset-right));
+  bottom: calc(20px + env(safe-area-inset-bottom));
+  z-index: 5;
+  padding: 11px 18px;
+  border: 1px solid rgba(15, 14, 13, 0.1);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--text-body);
+  font: 550 12px/1 var(--font);
+  cursor: pointer;
+  box-shadow: 0 16px 40px -26px rgba(15, 14, 13, 0.72), 0 1px 0 rgba(255, 255, 255, 0.92) inset;
+  backdrop-filter: blur(20px) saturate(1.35);
+  -webkit-backdrop-filter: blur(20px) saturate(1.35);
+  /* Ghost at first, fully present after five minutes of talking. */
+  opacity: 0.12;
+  transition: opacity 300s linear;
+}
+#penny.fading { opacity: 1; }
+/* transition:none (not a shorter duration): the 5-minute fade already
+   targets opacity 1, so a same-value retarget never interrupts it — only
+   cancelling the transition makes the button snap fully visible. */
+#penny.lit { opacity: 1; transition: none; }
+#penny:hover,
+#penny:focus-visible { opacity: 1; transition: opacity 200ms ease; }
+
+/* --- feedback sheet -------------------------------------------------------------- */
+
+#sheet {
+  position: fixed;
+  inset: 0;
+  z-index: 10;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(15, 14, 13, 0.22);
+  backdrop-filter: blur(6px);
+  -webkit-backdrop-filter: blur(6px);
+}
+
+.sheet-panel {
+  width: min(26rem, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+  padding: 22px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 4);
+  background: var(--surface-card);
+  box-shadow: 0 40px 90px -40px rgba(15, 14, 13, 0.5);
+}
+
+.sheet-panel h2 {
+  margin: 0;
+  font-size: 19px;
+  font-weight: 620;
+  color: var(--text);
+}
+
+#sheet-sub {
+  margin: 0;
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text-dim);
+}
+
+.sheet-panel textarea,
+.sheet-panel input {
+  width: 100%;
+  padding: 11px 13px;
+  border: 1px solid var(--border);
+  border-radius: calc(var(--radius) * 2);
+  background: var(--gray-50);
+  color: var(--text);
+  font: 400 14px/1.5 var(--font);
+  resize: vertical;
+}
+.sheet-panel textarea:focus,
+.sheet-panel input:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--tint) 55%, var(--border));
+}
+
+.sheet-row {
+  display: flex;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+#fb-send {
+  padding: 11px 22px;
+  border: none;
+  border-radius: 999px;
+  background: var(--tint);
+  color: white;
+  font: 650 13px/1 var(--font);
+  cursor: pointer;
+  transition: transform 160ms ease, opacity 160ms ease;
+}
+#fb-send:hover { transform: translateY(-1px); }
+#fb-send:disabled { opacity: 0.5; cursor: default; }
+
+.sheet-row .ghost {
+  padding: 11px 18px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--text-dim);
+  font: 550 13px/1 var(--font);
+  cursor: pointer;
+}
+
+#sheet-done {
+  margin: 2px 0 0;
+  font-size: 13px;
+  color: var(--fish-teal);
+}
+
+/* --- typed dev input ------------------------------------------------------------------ */
+
+#typed {
+  position: fixed;
+  bottom: calc(84px + env(safe-area-inset-bottom));
+  left: 50%;
+  z-index: 5;
+  transform: translateX(-50%);
+  width: min(24rem, calc(100vw - 32px));
+}
+
+#typed input {
+  width: 100%;
+  padding: 11px 16px;
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.9);
+  font: 400 13px/1 var(--mono);
+  color: var(--text);
+}
+
+/* --- small screens --------------------------------------------------------------------- */
+
+@media (max-width: 560px) {
+  #who { top: calc(56px + env(safe-area-inset-top)); padding: 11px 20px; }
+  #who .who-name { font-size: 18px; }
+  #penny { bottom: calc(86px + env(safe-area-inset-bottom)); }
+  #typed { bottom: calc(150px + env(safe-area-inset-bottom)); }
+  #cast img { width: 58px; }
+  #cast img + img { margin-left: -11px; }
+  #toast { flex-direction: column; text-align: center; gap: 10px; }
+  .toast-body { align-items: center; }
+  .toast-actions { justify-content: center; }
+}

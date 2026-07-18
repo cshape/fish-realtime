@@ -28,6 +28,8 @@ import { fileURLToPath } from "node:url";
 import { WebSocketServer, WebSocket } from "ws";
 import { AccessToken, RoomConfiguration, RoomAgentDispatch } from "livekit-server-sdk";
 import { VOICES, PERSONAS, DEFAULT_PERSONA, isPersona, systemPromptFor, publicCatalog, pickGreeting } from "./personas.js";
+import { CHARACTERS, pickCharacter, characterSystemPrompt, pickCharacterGreeting, characterVoiceId, publicCharacter } from "./characters.js";
+import { logRoulette, logFeedback } from "./datalog.js";
 import { FishPipeline, TTS_SAMPLE_RATE, FISH_MODEL, FISH_LATENCY_MODE } from "./tts.js";
 import { AUDIO_CONFIG, INACTIVITY_CONFIG, LLM_CONFIG, LK_AGENT_NAME_DEFAULT } from "./public/config.js";
 
@@ -55,6 +57,11 @@ const LLM_MODEL = process.env.LLM_MODEL || "google/gemma-4-26B-A4B-it";
 required("FISH_API_KEY"); // consumed by tts.js
 
 const MIC_SAMPLE_RATE = AUDIO_CONFIG.inputSampleRate; // browser -> Deepgram; TTS_SAMPLE_RATE from tts.js
+
+// Dev-only: TEXT_INPUT=1 lets the browser (or a test script) inject typed
+// user turns over the websocket — for exercising roulette characters
+// (kicks, achievements) without speaking into a mic. Off in production.
+const TEXT_INPUT_ENABLED = process.env.TEXT_INPUT === "1";
 
 // Energy gate for latency measurement (NOT for turn-taking — that's Flux's
 // job). A mic chunk whose RMS clears this is treated as "the user is audibly
@@ -111,6 +118,58 @@ class SentenceChunker {
     const rest = this.#buf;
     this.#buf = "";
     return rest;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Directive filter — strips inline [[tag]] directives (roulette: [[kick]],
+// [[achievement]]) from the LLM stream before the sentence chunker sees
+// them, invoking onDirective(name) per complete tag. Text is only held back
+// while a potential tag is open, so TTS latency is unaffected without tags.
+// ---------------------------------------------------------------------------
+
+class DirectiveFilter {
+  #buf = "";
+  #onDirective;
+
+  constructor(onDirective) {
+    this.#onDirective = onDirective;
+  }
+
+  push(text) {
+    this.#buf += text;
+    return this.#drain(false);
+  }
+
+  flush() {
+    return this.#drain(true);
+  }
+
+  #drain(final) {
+    let out = "";
+    for (;;) {
+      const open = this.#buf.indexOf("[[");
+      if (open === -1) {
+        // Hold back a trailing "[" — it may become "[[" with the next token.
+        const keep = final || !this.#buf.endsWith("[") ? this.#buf.length : this.#buf.length - 1;
+        out += this.#buf.slice(0, keep);
+        this.#buf = this.#buf.slice(keep);
+        return out;
+      }
+      out += this.#buf.slice(0, open);
+      const close = this.#buf.indexOf("]]", open + 2);
+      if (close === -1) {
+        this.#buf = this.#buf.slice(open);
+        // An unclosed "tag" that runs long (or ends the stream) is text.
+        if (final || this.#buf.length > 64) {
+          out += this.#buf;
+          this.#buf = "";
+        }
+        return out;
+      }
+      this.#onDirective(this.#buf.slice(open + 2, close).trim().toLowerCase());
+      this.#buf = this.#buf.slice(close + 2);
+    }
   }
 }
 
@@ -213,6 +272,10 @@ class Session {
     this.turn = null;
     this.turnCounter = 0;
     this.personaId = DEFAULT_PERSONA;
+    // "persona" (the curated demo) or "roulette" (random character line).
+    this.mode = "persona";
+    this.roulette = null; // { seen, character, unlocked, kicked }
+    this.destroyed = false;
     // Wall time of the last mic chunk with speech-level energy. Flux's
     // TurnInfo events have no word timings (audio_window_end just tracks how
     // much audio it has processed, silence included), so this energy gate is
@@ -248,7 +311,57 @@ class Session {
     this.#startSpokenLine(pickGreeting(id));
   }
 
+  // Enter roulette mode: the session stops being a persona demo and becomes
+  // a random-stranger line. Idempotent.
+  startRoulette() {
+    if (this.mode === "roulette") return;
+    this.mode = "roulette";
+    this.roulette = { seen: [], character: null, unlocked: false, kicked: false };
+    logRoulette(this.sid, "session_start");
+    this.nextCharacter("start");
+  }
+
+  // Spin to a new character: fresh history, fresh achievement, new voice,
+  // spoken greeting. reason: "start" | "skip" (user) | after a kick the
+  // client also sends "skip"-style next, logged as "post_kick".
+  nextCharacter(reason) {
+    if (this.mode !== "roulette") return;
+    const r = this.roulette;
+    if (reason === "skip" && r.character && !r.kicked) {
+      logRoulette(this.sid, "skip", { character: r.character.key });
+    }
+    if (this.turn) this.#cancelTurn();
+    this.sendClear();
+    this.history = [];
+    r.unlocked = false;
+    r.kicked = false;
+    const c = pickCharacter(r.seen);
+    r.character = c;
+    r.seen.push(c.key);
+    logRoulette(this.sid, "character_start", { character: c.key, reason });
+    this.sendJson({ type: "character", character: publicCharacter(c) });
+    const greeting = pickCharacterGreeting(c);
+    logRoulette(this.sid, "greeting", { character: c.key, text: greeting });
+    this.#startSpokenLine(greeting);
+  }
+
+  // Dev-only (TEXT_INPUT=1): a typed user turn, as if Flux emitted EndOfTurn
+  // with this transcript. Lets characters be tested without a microphone.
+  onTextInput(text) {
+    if (!text) return;
+    if (this.mode === "roulette" && this.roulette.kicked) return;
+    if (this.turn) this.#cancelTurn();
+    this.sendClear();
+    this.sendJson({ type: "user_final", text });
+    if (this.mode === "roulette") {
+      logRoulette(this.sid, "user", { character: this.roulette.character?.key, text, typed: true });
+    }
+    this.#startTurn(text, { speculative: false });
+    this.#commitTurn(0, Date.now());
+  }
+
   triggerInactivityNudge() {
+    if (this.mode === "roulette" && this.roulette.kicked) return;
     // Never interrupt an active turn. The browser retries this narrow command
     // while preserving the original 30-second disconnect deadline.
     if (this.turn || this.agentAudible()) {
@@ -370,6 +483,10 @@ class Session {
   }
 
   #onTurnInfo(msg) {
+    // After a kick, the line is dead: the character said goodbye and hung
+    // up. No barge-in (the goodbye plays out), no new turns — the client
+    // moves on with roulette_next.
+    if (this.mode === "roulette" && (this.roulette.kicked || this.turn?.kick)) return;
     const transcript = (msg.transcript || "").trim();
     switch (msg.event) {
       case "StartOfTurn":
@@ -437,6 +554,9 @@ class Session {
         const speechEndWall = this.lastSpeechWall || Date.now();
         const sttMs = Math.max(0, Date.now() - speechEndWall);
         this.sendJson({ type: "user_final", text: transcript });
+        if (this.mode === "roulette") {
+          logRoulette(this.sid, "user", { character: this.roulette.character?.key, text: transcript });
+        }
         if (this.turn && !this.turn.committed && this.turn.userText === transcript) {
           this.#commitTurn(sttMs, speechEndWall);
         } else {
@@ -507,8 +627,20 @@ class Session {
       if (t.spoken && !t.inHistory) {
         if (t.userText && !t.systemEvent) this.history.push({ role: "user", content: t.userText });
         this.history.push({ role: "assistant", content: t.spoken + "…" });
+        if (this.mode === "roulette") {
+          logRoulette(this.sid, "agent", {
+            character: this.roulette.character?.key,
+            text: t.spoken,
+            interrupted: true,
+          });
+        }
       }
       this.sendClear(); // flush queued playback everywhere
+    } else if (this.mode === "roulette") {
+      // Speculative rollback: any roulette state the discarded turn staged
+      // comes back, so the real turn can earn it again.
+      if (t.achievement) this.roulette.unlocked = false;
+      if (t.kick) this.roulette.kicked = false;
     }
     // Speculative turns roll back silently: no client messages, no history.
   }
@@ -526,6 +658,8 @@ class Session {
       eager: speculative,
       spokenLine, // greeting: no LLM, no metrics
       systemEvent, // synthetic committed LLM turn; not attributed to the user
+      kick: false, // roulette: this reply ends with the character hanging up
+      achievement: false, // roulette: this reply unlocked the achievement
       outbox: [],
       // Latency bookkeeping (wall-clock ms)
       llmStartWall: Date.now(),
@@ -538,8 +672,43 @@ class Session {
     };
   }
 
+  // Voice for the current speaker: the roulette character's, else the persona's.
+  #voiceId() {
+    if (this.mode === "roulette" && this.roulette.character) {
+      return characterVoiceId(this.roulette.character);
+    }
+    return VOICES[PERSONAS[this.personaId].voice];
+  }
+
+  #systemPrompt() {
+    if (this.mode === "roulette" && this.roulette.character) {
+      return characterSystemPrompt(this.roulette.character);
+    }
+    return systemPromptFor(this.personaId);
+  }
+
+  // A roulette directive surfaced mid-stream ([[kick]] / [[achievement]]),
+  // already stripped from the spoken text.
+  #onDirective(turn, name) {
+    if (this.mode !== "roulette") return;
+    const c = this.roulette.character;
+    if (name === "kick") {
+      turn.kick = true;
+    } else if (name === "achievement" && c && !this.roulette.unlocked) {
+      turn.achievement = true;
+      this.roulette.unlocked = true;
+      logRoulette(this.sid, "achievement", { character: c.key, achievement: c.achievement.id });
+      this.#deliver(turn, "json", {
+        type: "achievement",
+        id: c.achievement.id,
+        name: c.achievement.name,
+        character: c.name,
+      });
+    }
+  }
+
   #openTurnPipeline(turn) {
-    return new FishPipeline(VOICES[PERSONAS[this.personaId].voice], {
+    return new FishPipeline(this.#voiceId(), {
       onAudio: (buf) => {
         if (this.turn?.id !== turn.id) return;
         if (turn.firstAudioWall === 0) turn.firstAudioWall = Date.now();
@@ -549,6 +718,13 @@ class Session {
         if (this.turn?.id !== turn.id) return;
         turn.finished = true;
         this.#deliver(turn, "json", { type: "agent_done" });
+        if (turn.kick && this.mode === "roulette") {
+          // The goodbye is fully synthesized; hang up. The client waits for
+          // playback to drain before moving on.
+          this.roulette.kicked = true;
+          logRoulette(this.sid, "kick", { character: this.roulette.character?.key });
+          this.#deliver(turn, "json", { type: "kicked", character: this.roulette.character?.name ?? null });
+        }
         if (turn.committed) this.turn = null;
       },
       onError: (err) => {
@@ -593,7 +769,14 @@ class Session {
     turn.fish = this.#openTurnPipeline(turn);
 
     const chunker = new SentenceChunker();
-    let full = ""; // full reply text, for history
+    let full = ""; // full reply text, for history (tags included — the model
+    // remembers it already used them; the filter keeps them out of the TTS)
+    // Directives only exist in roulette mode; personas speak unfiltered.
+    const filter = this.mode === "roulette"
+      ? new DirectiveFilter((name) => {
+          if (this.turn?.id === turn.id) this.#onDirective(turn, name);
+        })
+      : null;
     const pushToFish = (text) => {
       if (!text) return;
       if (turn.firstTextPushWall === 0) turn.firstTextPushWall = Date.now();
@@ -603,13 +786,14 @@ class Session {
     const onText = (text) => {
       if (!text) return;
       full += text;
-      for (const sentence of chunker.push(text)) pushToFish(sentence);
+      const clean = filter ? filter.push(text) : text;
+      for (const sentence of chunker.push(clean)) pushToFish(sentence);
     };
 
     try {
       await streamLLM(
         [
-          { role: "system", content: systemPromptFor(this.personaId) },
+          { role: "system", content: this.#systemPrompt() },
           ...this.history,
           { role: turn.systemEvent ? "system" : "user", content: turn.userText },
         ],
@@ -621,6 +805,9 @@ class Session {
         },
       );
       if (!live()) return;
+      if (filter) {
+        for (const sentence of chunker.push(filter.flush())) pushToFish(sentence);
+      }
       pushToFish(chunker.flush());
       turn.fish.endInput();
       turn.inHistory = true;
@@ -631,6 +818,9 @@ class Session {
           { role: "user", content: turn.userText },
           { role: "assistant", content: full },
         );
+      }
+      if (this.mode === "roulette") {
+        logRoulette(this.sid, "agent", { character: this.roulette.character?.key, text: full });
       }
     } catch (err) {
       if (err.name === "AbortError") return; // barge-in / rollback — handled
@@ -645,6 +835,11 @@ class Session {
   }
 
   destroy() {
+    if (this.destroyed) return;
+    this.destroyed = true;
+    if (this.mode === "roulette") {
+      logRoulette(this.sid, "session_end", { characters_met: this.roulette.seen.length });
+    }
     this.turn?.abort.abort();
     this.turn?.fish?.close();
     this.turn = null;
@@ -700,6 +895,43 @@ let lkClientBundle = null; // ~540KB and immutable per deploy: read once, cache
 
 const server = http.createServer((req, res) => {
   const url = new URL(req.url, "http://x");
+  if (url.pathname === "/feedback" && req.method === "POST") {
+    // "Penny for your thoughts" + achievement credit claims. Append-only
+    // into data/feedback-*.jsonl; everything is length-capped, nothing is
+    // trusted.
+    let body = "";
+    req.on("data", (chunk) => {
+      body += chunk;
+      if (body.length > 10_000) req.destroy();
+    });
+    req.on("end", () => {
+      try {
+        const p = JSON.parse(body);
+        logFeedback({
+          sid: String(p.sid ?? "").slice(0, 64),
+          character: String(p.character ?? "").slice(0, 32),
+          email: String(p.email ?? "").slice(0, 200),
+          text: String(p.text ?? "").slice(0, 4000),
+          kind: p.kind === "achievement_claim" ? "achievement_claim" : "feedback",
+          achievement: String(p.achievement ?? "").slice(0, 64),
+        });
+        res.writeHead(204).end();
+      } catch {
+        res.writeHead(400).end();
+      }
+    });
+    return;
+  }
+  if (url.pathname === "/cast.json") {
+    // Roulette landing teaser: which characters have portrait art on disk.
+    // Faces only — names and cards stay a surprise until you're connected.
+    const keys = Object.keys(CHARACTERS).filter((k) =>
+      fs.existsSync(path.join(__dirname, "public", "characters", k, "manifest.json")),
+    );
+    res.writeHead(200, { "Content-Type": "application/json" });
+    res.end(JSON.stringify({ cast: keys }));
+    return;
+  }
   if (url.pathname === "/catalog.json") {
     // The idle page renders personas/voices before any websocket exists.
     res.writeHead(200, { "Content-Type": "application/json" });
@@ -743,6 +975,8 @@ const server = http.createServer((req, res) => {
   // LiveKit mode at /lk/<persona>.
   if (url.pathname === "/lk" || (url.pathname.startsWith("/lk/") && isPersona(url.pathname.slice(4)))) {
     file = "/lk.html";
+  } else if (url.pathname === "/roulette") {
+    file = "/roulette.html";
   } else if (isPersona(url.pathname.slice(1))) {
     file = "/index.html";
   }
@@ -790,6 +1024,12 @@ server.on("upgrade", (req, socket, head) => {
           session.setPersona(msg.id);
         } else if (msg.type === "inactivity_nudge") {
           session.triggerInactivityNudge();
+        } else if (msg.type === "roulette_start") {
+          session.startRoulette();
+        } else if (msg.type === "roulette_next") {
+          session.nextCharacter(msg.reason === "post_kick" ? "post_kick" : "skip");
+        } else if (msg.type === "text_input" && TEXT_INPUT_ENABLED) {
+          session.onTextInput(String(msg.text ?? "").slice(0, 500).trim());
         }
       } catch {}
     });
@@ -808,6 +1048,7 @@ server.listen(PORT, () => {
   console.log(`  tts:  fish ${FISH_MODEL} latency=${FISH_LATENCY_MODE}`);
   console.log(`  personas: ${Object.keys(PERSONAS).join(", ")} | voices: ${Object.keys(VOICES).join(", ")}`);
   console.log(`  livekit mode (/lk): ${LK_ENABLED ? "enabled" : "disabled (set LIVEKIT_* env vars)"}`);
+  console.log(`  roulette (/roulette): enabled${TEXT_INPUT_ENABLED ? " (TEXT_INPUT dev mode ON)" : ""}`);
 });
 
 // The LiveKit agent worker is hosted on LiveKit Cloud (see Dockerfile +
