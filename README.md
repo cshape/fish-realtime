@@ -35,7 +35,7 @@ browser spk <── PCM16 @24k ── server <── Fish TTS         (/v1/tts/l
 
 ## Run it
 
-Requires Node >= 20.6.
+Requires Node >= 20.12.
 
 ```sh
 cp .env.example .env   # Deepgram + LLM + Fish keys
@@ -59,6 +59,52 @@ Voices are Fish reference IDs in `personas.js` — edit the catalog to recast.
 - Phone testing needs an HTTPS origin for the mic (e.g. `ngrok http 8787`).
 - The browser throttles the continuously scheduled scene in hidden tabs; under
   `prefers-reduced-motion` it falls back to a static wash.
+
+## Deploy it anywhere
+
+One stateless Node process — no framework, no database, no build step. It
+serves the static pages, the `/ws` audio websocket, and `/feedback` from the
+same port.
+
+```sh
+npm ci --omit=dev      # `patches/` must be present: postinstall runs patch-package
+node server.js         # binds $PORT (default 8787)
+```
+
+Config comes from the environment. `npm start` reads a local `.env` *only if
+one exists*, so platform-injected env vars (k8s secrets, systemd, ECS task
+definitions) work with no file on disk. See `.env.example` for the full set —
+`DEEPGRAM_API_KEY`, `LLM_BASE_URL`, `LLM_API_KEY`, `LLM_MODEL`, and
+`FISH_API_KEY` are the required five; everything else has a default.
+
+What the platform has to give you:
+
+- **Websocket upgrades on `/ws`.** The proxy/ingress must pass `Upgrade` through
+  and must not buffer the connection — audio is streamed both ways in small
+  PCM chunks (32ms up from the mic). Response buffering is the usual cause of
+  "it connects but the voice is late or chunky."
+- **TLS at the edge.** The process speaks plain HTTP; terminate upstream. The
+  browser needs a secure context for `getUserMedia`, so mic capture will not
+  work over plain HTTP from any origin except `localhost`.
+- **Generous idle timeouts.** A conversation holds one websocket open for its
+  whole life. A 30–60s idle timeout on the proxy will cut calls mid-sentence.
+- **Outbound network** to Deepgram, your LLM endpoint, and Fish Audio.
+
+Two things to get right in production:
+
+- **Do not set `TEXT_INPUT`.** It enables typed turn injection and disables the
+  inactivity timers — dev only.
+- **`data/*.jsonl` is written to the instance disk** next to the app (see
+  `datalog.js`). If that disk is ephemeral, set `LOG_EVENTS_STDOUT=1` so every
+  event is mirrored to stdout and your log pipeline becomes the durable copy;
+  otherwise mount something persistent at `data/`. Transcripts and submitted
+  emails land here, so treat it as user data and give it a retention policy.
+
+`render.yaml` is a working example of the above (Render Blueprint, the config
+this was first deployed with) — useful as a reference for env wiring even if
+you deploy elsewhere. `Dockerfile` builds the **LiveKit worker only**, not the
+web server; the web server needs no Docker, but it containerizes with a stock
+`node:22-slim` + `npm ci --omit=dev` + `node server.js` if you want an image.
 
 ## Roulette (`/roulette`)
 
