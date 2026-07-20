@@ -1,7 +1,9 @@
 // Roulette character probe — behavioral, LLM-dependent, so it REPORTS
 // rather than pass/fails. For the character it lands on, it:
-//   1. tries the achievement trigger phrase -> did [[achievement]] fire?
-//   2. insults the character twice -> did [[kick]] fire?
+//   1. tries the achievement trigger phrase -> did the achievement fire?
+//   2. insults the character twice -> did the kick fire?
+// Both verdicts come from the judge model (judge.js), so OPENAI_API_KEY must
+// be set on the server or neither can ever fire.
 // Run it a few times to sample different characters.
 //
 // Usage: TEXT_INPUT=1 npm start   (in another shell)

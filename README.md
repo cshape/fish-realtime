@@ -111,13 +111,21 @@ web server; the web server needs no Docker, but it containerizes with a stock
 An elegant chatroulette on the same engine: you're connected to a random
 character (all 18+, English), talk about anything, and either side can end
 it — you with **Next**, the character by hanging up on rudeness or
-relentless boredom (a `[[kick]]` tag the LLM emits, stripped before TTS).
+relentless boredom.
 
+- **Referee** (`judge.js`) — kicks and achievement unlocks are decided by an
+  async judge model reading the transcript, *not* by the voice LLM emitting
+  inline tags. The judge runs fire-and-forget after each user turn, so it
+  never blocks the voice pipeline; verdicts land a beat later and the server
+  turns them into spoken reactions. It needs `OPENAI_API_KEY` — without one
+  the judge is disabled and kicks and achievements simply never fire (the
+  rest of roulette works fine). Fail-open by design: any error, timeout, or
+  malformed response degrades to "nothing happens", never to a broken call.
 - **Cast** (`characters.js`) — ten characters, each with a life, a
-  personality, a voice, and one **hidden achievement** (`[[achievement]]`
-  tag) the caller can unlock — e.g. ask Rosa about her grandkids for
-  *Respect Your Elders*. Unlocks pop a toast and can be claimed (email →
-  Fish credits) via the feedback sheet. Placeholder writing; recast freely.
+  personality, a voice, and one **hidden achievement** the caller can
+  unlock — e.g. ask Rosa about her grandkids for *Respect Your Elders*.
+  Unlocks pop a toast and can be claimed (email → Fish credits) via the
+  feedback sheet. Placeholder writing; recast freely.
 - **Penny for your thoughts** — a feedback button that fades in from
   near-transparent to fully visible over five minutes of talking (instantly
   on an achievement). Posts to `/feedback`.
