@@ -613,6 +613,8 @@ els.toastClaim.onclick = () => {
   openSheet("claim");
 };
 els.toastLater.onclick = hideToast;
+// The toast now covers the screen, so the backdrop needs a way out too.
+els.toast.onclick = (e) => { if (e.target === els.toast) hideToast(); };
 els.fbSend.onclick = sendFeedback;
 els.fbClose.onclick = closeSheet;
 els.sheet.onclick = (e) => { if (e.target === els.sheet) closeSheet(); };

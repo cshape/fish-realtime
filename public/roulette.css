@@ -196,19 +196,33 @@ body.session-fullscreen #hero { display: none; }
 
 /* --- achievement celebration --------------------------------------------- */
 
-/* Centered over the character card (same anchor point), and larger than it,
-   so the unlock moment fully takes the stage instead of half-overlapping. */
+/* A full-bleed takeover rather than a card floating over the call: the unlock
+   moment gets the whole screen, and nothing of the character shows around it. */
 #toast {
   position: fixed;
-  top: 45%;
-  left: 50%;
+  inset: 0;
   z-index: 9;
-  transform: translate(-50%, -50%);
   display: flex;
   align-items: center;
-  gap: 20px;
-  width: min(36rem, calc(100vw - 24px));
-  padding: 26px 28px;
+  justify-content: center;
+  padding: 18px;
+  background: rgba(15, 14, 13, 0.34);
+  backdrop-filter: blur(10px) saturate(1.1);
+  -webkit-backdrop-filter: blur(10px) saturate(1.1);
+  animation: scrim-in 300ms ease;
+}
+
+.toast-panel {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  gap: 22px;
+  width: min(46rem, 100%);
+  max-height: 100%;
+  padding: 44px 46px;
   border: 1px solid color-mix(in srgb, var(--tint) 40%, transparent);
   border-radius: calc(var(--radius) * 4);
   background:
@@ -217,35 +231,39 @@ body.session-fullscreen #hero { display: none; }
   box-shadow:
     0 26px 70px -28px var(--tint),
     0 1px 0 rgba(255, 255, 255, 0.85) inset;
-  backdrop-filter: blur(14px) saturate(1.2);
-  -webkit-backdrop-filter: blur(14px) saturate(1.2);
+  overflow-y: auto;
   animation: toast-in 640ms cubic-bezier(0.18, 1.25, 0.3, 1);
 }
 
 /* Twinkles: pure CSS, no assets. */
-#toast::before,
-#toast::after {
+.toast-panel::before,
+.toast-panel::after {
   content: "✦";
   position: absolute;
   color: color-mix(in srgb, var(--tint) 85%, white);
   animation: twinkle 1.6s ease-in-out infinite;
   pointer-events: none;
 }
-#toast::before { top: -9px; left: 22px; font-size: 15px; }
-#toast::after { bottom: -7px; right: 30px; font-size: 11px; animation-delay: 0.55s; }
+.toast-panel::before { top: 18px; left: 26px; font-size: 18px; }
+.toast-panel::after { bottom: 20px; right: 34px; font-size: 13px; animation-delay: 0.55s; }
 
 @keyframes twinkle {
   0%, 100% { opacity: 0.25; transform: scale(0.8) rotate(-8deg); }
   50% { opacity: 1; transform: scale(1.15) rotate(8deg); }
 }
 
+@keyframes scrim-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
 @keyframes toast-in {
-  0% { opacity: 0; transform: translate(-50%, calc(-50% - 22px)) scale(0.92); }
-  100% { opacity: 1; transform: translate(-50%, -50%) scale(1); }
+  0% { opacity: 0; transform: translateY(-22px) scale(0.92); }
+  100% { opacity: 1; transform: translateY(0) scale(1); }
 }
 
 #toast-cam {
-  width: 150px;
+  width: min(260px, 62%);
   aspect-ratio: 4 / 3;
   flex: none;
   border-radius: calc(var(--radius) * 2.5);
@@ -258,12 +276,13 @@ body.session-fullscreen #hero { display: none; }
 .toast-body {
   display: flex;
   flex-direction: column;
-  gap: 3px;
+  align-items: center;
+  gap: 6px;
   min-width: 0;
 }
 
 .toast-kicker {
-  font-size: 10px;
+  font-size: 11px;
   font-weight: 650;
   text-transform: uppercase;
   letter-spacing: 0.09em;
@@ -271,32 +290,34 @@ body.session-fullscreen #hero { display: none; }
 }
 
 #toast-name {
-  font-size: 26px;
+  font-size: clamp(28px, 4.4vw, 40px);
   font-weight: 640;
   line-height: 1.15;
   color: var(--text);
 }
 
 #toast-sub {
-  font-size: 12.5px;
-  line-height: 1.45;
+  max-width: 30rem;
+  font-size: 14px;
+  line-height: 1.5;
   color: var(--text-dim);
 }
 
 .toast-actions {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 10px;
-  margin-top: 8px;
+  margin-top: 14px;
 }
 
 #toast-claim {
-  padding: 9px 18px;
+  padding: 13px 26px;
   border: none;
   border-radius: 999px;
   background: var(--tint);
   color: white;
-  font: 650 12.5px/1 var(--font);
+  font: 650 14px/1 var(--font);
   cursor: pointer;
   box-shadow: 0 10px 24px -14px var(--tint);
   transition: transform 160ms ease;
@@ -304,11 +325,11 @@ body.session-fullscreen #hero { display: none; }
 #toast-claim:hover { transform: translateY(-1px); }
 
 #toast-later {
-  padding: 9px 6px;
+  padding: 13px 10px;
   border: none;
   background: none;
   color: var(--text-dim);
-  font: 550 12px/1 var(--font);
+  font: 550 13px/1 var(--font);
   cursor: pointer;
 }
 #toast-later:hover { color: var(--text); }
@@ -352,33 +373,36 @@ body.session-fullscreen #hero { display: none; }
   align-items: center;
   justify-content: center;
   padding: 18px;
-  background: rgba(15, 14, 13, 0.22);
-  backdrop-filter: blur(6px);
-  -webkit-backdrop-filter: blur(6px);
+  background: rgba(15, 14, 13, 0.34);
+  backdrop-filter: blur(10px) saturate(1.1);
+  -webkit-backdrop-filter: blur(10px) saturate(1.1);
+  animation: scrim-in 300ms ease;
 }
 
 .sheet-panel {
-  width: min(30rem, 100%);
+  width: min(46rem, 100%);
+  max-height: 100%;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding: 22px;
+  gap: 12px;
+  padding: 40px 44px;
   border: 1px solid var(--border);
   border-radius: calc(var(--radius) * 4);
   background: var(--surface-card);
   box-shadow: 0 40px 90px -40px rgba(15, 14, 13, 0.5);
+  overflow-y: auto;
 }
 
 .sheet-panel h2 {
   margin: 0;
-  font-size: 19px;
+  font-size: clamp(22px, 3.2vw, 30px);
   font-weight: 620;
   color: var(--text);
 }
 
 #sheet-sub {
   margin: 0;
-  font-size: 13px;
+  font-size: 14px;
   line-height: 1.5;
   color: var(--text-dim);
 }
@@ -391,9 +415,10 @@ body.session-fullscreen #hero { display: none; }
   border-radius: calc(var(--radius) * 2);
   background: var(--gray-50);
   color: var(--text);
-  font: 400 14px/1.5 var(--font);
+  font: 400 15px/1.5 var(--font);
   resize: vertical;
 }
+.sheet-panel textarea { min-height: 9rem; }
 .sheet-panel textarea:focus,
 .sheet-panel input:focus {
   outline: none;
@@ -463,9 +488,8 @@ body.session-fullscreen #hero { display: none; }
   #who .who-name { font-size: 18px; }
   #penny { bottom: calc(86px + env(safe-area-inset-bottom)); }
   #typed { bottom: calc(150px + env(safe-area-inset-bottom)); }
-  #toast { flex-direction: column; text-align: center; gap: 12px; padding: 22px 20px; }
-  .toast-body { align-items: center; }
-  .toast-actions { justify-content: center; }
+  .toast-panel { gap: 16px; padding: 30px 22px; }
+  .sheet-panel { padding: 28px 22px; }
   /* Centered pill reads better than a corner button on a narrow screen. */
   #penny {
     right: auto;
