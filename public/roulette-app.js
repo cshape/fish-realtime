@@ -30,7 +30,6 @@ const els = {
   veil: $("veil"),
   veilTitle: $("veil-title"),
   veilSub: $("veil-sub"),
-  cast: $("cast"),
   achProgress: $("ach-progress"),
   toast: $("toast"),
   toastCam: $("toast-cam"),
@@ -199,18 +198,12 @@ function showToast(name, characterName) {
   toastTimer = setTimeout(hideToast, 18_000);
 }
 
-// Landing teaser: the cast's faces, shuffled, no names.
+// How many characters there are — the denominator for achievement progress.
 fetch("/cast.json")
   .then((r) => r.json())
   .then(({ cast }) => {
     castTotal = cast.length;
     renderProgress();
-    for (const key of cast.sort(() => Math.random() - 0.5)) {
-      const img = new Image();
-      img.src = `/characters/${key}/f1.png`;
-      img.alt = "";
-      els.cast.appendChild(img);
-    }
   })
   .catch(() => {});
 

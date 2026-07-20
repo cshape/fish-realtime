@@ -29,37 +29,6 @@ body.ru-idle #typed {
   color: var(--text);
 }
 
-.hero-sub {
-  max-width: 30rem;
-  margin: 0;
-  color: var(--text-dim);
-  font-size: 15px;
-  line-height: 1.6;
-}
-
-/* The cast: a fanned strip of pixel faces, no names — a teaser, not a menu. */
-#cast {
-  display: flex;
-  justify-content: center;
-  margin: 6px 0 2px;
-}
-
-#cast img {
-  width: 76px;
-  aspect-ratio: 4 / 3;
-  border-radius: 8px;
-  border: 1px solid rgba(255, 255, 255, 0.65);
-  image-rendering: pixelated;
-  box-shadow: 0 10px 26px -14px rgba(15, 14, 13, 0.6);
-  background: #000;
-  transition: transform 200ms ease;
-}
-
-#cast img + img { margin-left: -14px; }
-#cast img:nth-child(odd) { transform: rotate(-2.4deg); }
-#cast img:nth-child(even) { transform: rotate(2deg) translateY(3px); }
-#cast img:hover { transform: rotate(0deg) translateY(-6px) scale(1.5); z-index: 2; position: relative; }
-
 #start {
   margin-top: 10px;
   padding: 16px 34px;
@@ -76,13 +45,6 @@ body.ru-idle #typed {
 }
 #start:hover { transform: translateY(-2px); border-color: color-mix(in srgb, var(--tint) 40%, var(--gray-300)); }
 #start:active { transform: translateY(0) scale(0.97); }
-
-.hero-fine {
-  margin: 4px 0 0;
-  color: var(--text-dim);
-  font-size: 11px;
-  opacity: 0.75;
-}
 
 body.session-fullscreen #hero { display: none; }
 
@@ -501,9 +463,6 @@ body.session-fullscreen #hero { display: none; }
   #who .who-name { font-size: 18px; }
   #penny { bottom: calc(86px + env(safe-area-inset-bottom)); }
   #typed { bottom: calc(150px + env(safe-area-inset-bottom)); }
-  #cast { flex-wrap: wrap; row-gap: 7px; max-width: 300px; margin-left: auto; margin-right: auto; }
-  #cast img { width: 58px; }
-  #cast img + img { margin-left: -11px; }
   #toast { flex-direction: column; text-align: center; gap: 12px; padding: 22px 20px; }
   .toast-body { align-items: center; }
   .toast-actions { justify-content: center; }
