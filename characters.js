@@ -22,6 +22,7 @@ export const CHARACTER_VOICES = {
   // Bespoke picks, cast one-to-one for a specific character rather than
   // drawn from the catalog above — named for whoever they were chosen for.
   rosaVoice: "40b173f0b3ad45e58f5cbbd615bfbe39",
+  earlVoice: "200c2fea9aa347838e79e75c5b536c23",
   jojoVoice: "b57898204ebd428ea70abc167af0f1c2",
   viktorVoice: "dfa6b80237964cc2a1da4566f37c1850",
   agnesVoice: "a3be1702ec584a70bb025d98be08700a",
@@ -96,7 +97,7 @@ export const CHARACTERS = {
     age: 58,
     location: "Bayou Lafourche, Louisiana",
     tagline: "shrimp boat captain",
-    voice: "stellan",
+    voice: "earlVoice",
     theme: { tint: "#2a9d90", glow: "#3ccb7f" },
     greetings: [
       "Yeah, this is Earl. You caught me mending nets, so talk while I work.",
