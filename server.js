@@ -1024,7 +1024,17 @@ const server = http.createServer((req, res) => {
       res.writeHead(404).end("not found");
       return;
     }
-    res.writeHead(200, { "Content-Type": MIME[path.extname(full)] || "application/octet-stream" });
+    const ext = path.extname(full);
+    // App code must never go stale across deploys (we ship often and a
+    // mixed old-HTML/new-JS client misbehaves in confusing ways); images
+    // are stable and can cache for an hour.
+    const cache = [".html", ".js", ".css"].includes(ext)
+      ? "no-cache"
+      : "public, max-age=3600";
+    res.writeHead(200, {
+      "Content-Type": MIME[ext] || "application/octet-stream",
+      "Cache-Control": cache,
+    });
     res.end(data);
   });
 });

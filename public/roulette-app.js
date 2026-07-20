@@ -74,6 +74,16 @@ let switching = false; // veil is up, waiting on the next character
 let pendingKick = null; // character name; transition once playback drains
 let pendingEnd = null; // character name; agent hung up (idle) — teardown after drain
 let endFallbackTimer = 0; // hard stop if the goodbye never arrives
+let endTransitionTimer = 0; // scheduled stop after the "hung up" veil
+
+// A Next click (or a fresh character) proves the caller is still there:
+// cancel any in-progress idle teardown so it can't kill the new call.
+function cancelIdleTeardown() {
+  pendingEnd = null;
+  clearTimeout(endTransitionTimer);
+  clearTimeout(endFallbackTimer);
+  endTransitionTimer = endFallbackTimer = 0;
+}
 let lastAchievement = null; // { id, name, character } for the claim sheet
 let sheetMode = "feedback"; // "feedback" | "claim"
 let inactivityNudgeTimer = 0;
@@ -374,6 +384,9 @@ function nextCharacter(reason) {
   switching = true;
   showVeil(reason === "post_kick" ? "Finding someone nicer…" : "Finding someone new…");
   send({ type: "roulette_next", reason: reason === "post_kick" ? "post_kick" : "skip" });
+  // Failsafe: if the new character never arrives (hiccup, dropped message),
+  // release the guard so Next can be pressed again instead of dying silently.
+  setTimeout(() => { switching = false; }, 10_000);
 }
 
 function finishKickTransition() {
@@ -393,7 +406,8 @@ function finishEndTransition() {
   const name = pendingEnd;
   pendingEnd = null;
   showVeil(`${name} hung up`, "You went quiet, so they said goodbye.");
-  setTimeout(() => { if (running) stop(); }, 2600);
+  clearTimeout(endTransitionTimer);
+  endTransitionTimer = setTimeout(() => { if (running) stop(); }, 2600);
 }
 
 // --- session ---------------------------------------------------------------------------
@@ -460,13 +474,11 @@ function leaveSession() {
 function stop() {
   if (!running && !connecting) return;
   clearInactivityTimers();
-  clearTimeout(endFallbackTimer);
-  endFallbackTimer = 0;
+  cancelIdleTeardown();
   running = false;
   connecting = false;
   switching = false;
   pendingKick = null;
-  pendingEnd = null;
   ws?.close();
   ws = null;
   micStream?.getTracks().forEach((t) => t.stop());
@@ -498,6 +510,7 @@ function handleEvent(msg) {
       character = msg.character;
       switching = false;
       pendingKick = null;
+      cancelIdleTeardown(); // a live character defuses any scheduled stop
       applyTheme(character.theme);
       renderCharacter(character);
       // Webcam bubble if this character has generated frames; text card if not.
@@ -523,6 +536,7 @@ function handleEvent(msg) {
     case "call_ended":
       // The agent hung up on an idle caller — same drain-then-transition
       // dance as a kick, but the session ends instead of respinning.
+      // (A Next click during any of this cancels the teardown and respins.)
       clearInactivityTimers();
       clearTimeout(endFallbackTimer);
       endFallbackTimer = setTimeout(() => { if (running) stop(); }, 20_000);
@@ -593,7 +607,13 @@ function handleEvent(msg) {
 els.start.onclick = start;
 els.orb.onclick = () => (running || connecting ? stop() : start());
 els.mute.onclick = () => { if (running || connecting) setMuted(!muted); };
-els.next.onclick = () => { if (running && !pendingKick) nextCharacter("skip"); };
+els.next.onclick = () => {
+  if (!running || pendingKick) return;
+  // Clicking Next mid-hang-up means "I'm still here — someone new please":
+  // cancel the idle teardown so it can't kill the fresh call.
+  if (pendingEnd || endTransitionTimer) cancelIdleTeardown();
+  nextCharacter("skip");
+};
 els.penny.onclick = () => openSheet(lastAchievement ? "claim" : "feedback");
 els.toastClaim.onclick = () => {
   hideToast();
