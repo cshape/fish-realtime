@@ -340,7 +340,6 @@ async function initAudio() {
     const wasSpeaking = agentSpeaking;
     agentSpeaking = e.data.playing;
     portrait.talking(agentSpeaking);
-    els.whoCam.classList.toggle("talking", agentSpeaking);
     if (!running) return;
     if (!switching) setOrb(agentSpeaking ? "speaking" : "listening");
     if (agentSpeaking) {
@@ -453,7 +452,6 @@ function leaveSession() {
   document.body.classList.remove("session-fullscreen");
   portrait.reset();
   els.whoCam.classList.add("hidden");
-  els.whoCam.classList.remove("talking");
   els.who.classList.add("hidden");
   els.veil.classList.add("hidden");
   els.toast.classList.add("hidden");

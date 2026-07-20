@@ -118,15 +118,6 @@ body.session-fullscreen #hero { display: none; }
   box-shadow: 0 18px 44px -30px var(--tint);
 }
 
-#who-cam.talking {
-  animation: cam-bob 460ms ease-in-out infinite alternate;
-}
-
-@keyframes cam-bob {
-  from { transform: translateY(0); }
-  to { transform: translateY(-2px); }
-}
-
 /* While the achievement celebration is up, the card yields the stage. */
 #who.celebrating {
   opacity: 0;
