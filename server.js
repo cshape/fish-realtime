@@ -125,23 +125,16 @@ class SentenceChunker {
 // ---------------------------------------------------------------------------
 // Roulette reaction prompts — spoken lines the server injects when a judge
 // verdict (judge.js) lands. The voice LLM never decides kicks/achievements.
+//
+// Only kicks get a spoken line. An achievement is announced by the UI alone:
+// having the character narrate the unlock broke the fiction — they'd stop
+// being a stranger on a call and start being a game telling you you'd won.
 // ---------------------------------------------------------------------------
 
 const KICK_GOODBYE_PROMPT =
   "You've had enough of this caller — they've been rude, creepy, or " +
   "hopelessly dull. In character, say ONE short parting line as you hang " +
   "up on them. Blunt is fine. No questions, under two sentences.";
-
-function achievementPrompt(c) {
-  return (
-    `The caller just did something special: they genuinely ${c.achievement.trigger} ` +
-    `That unlocked the hidden achievement "${c.achievement.name}". React in ` +
-    "character with real delight: tell them they've unlocked a hidden " +
-    "achievement and can claim free Fish Audio credits by tapping the " +
-    "little feedback button and leaving their email. Keep it to two short " +
-    "sentences and stay in the flow of the conversation."
-  );
-}
 
 // ---------------------------------------------------------------------------
 // Echo detection — is this "user" transcript actually the agent's own voice
@@ -397,15 +390,13 @@ class Session {
       const c = this.roulette.character;
       this.roulette.unlocked = true;
       logRoulette(this.sid, "achievement", { character: c.key, achievement: c.achievement.id });
-      // Toast can show immediately; the spoken reaction waits its turn.
+      // UI-only: the toast announces it, the character stays oblivious and the
+      // conversation carries on uninterrupted.
       this.sendJson({
         type: "achievement",
         id: c.achievement.id,
         name: c.achievement.name,
         character: c.name,
-      });
-      this.#queueAction(() => {
-        if (stillValid()) this.#startTurn(achievementPrompt(c), { speculative: false, systemEvent: true });
       });
     }
     if (verdict.kick) {

@@ -116,8 +116,10 @@ relentless boredom.
 - **Referee** (`judge.js`) — kicks and achievement unlocks are decided by an
   async judge model reading the transcript, *not* by the voice LLM emitting
   inline tags. The judge runs fire-and-forget after each user turn, so it
-  never blocks the voice pipeline; verdicts land a beat later and the server
-  turns them into spoken reactions. It needs `OPENAI_API_KEY` — without one
+  never blocks the voice pipeline; verdicts land a beat later. A kick becomes
+  a spoken parting line; an achievement is announced by the UI alone, so the
+  character never breaks the fiction to tell you that you won. It needs
+  `OPENAI_API_KEY` — without one
   the judge is disabled and kicks and achievements simply never fire (the
   rest of roulette works fine). Fail-open by design: any error, timeout, or
   malformed response degrades to "nothing happens", never to a broken call.

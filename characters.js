@@ -46,8 +46,9 @@ const SPOKEN_STYLE =
 
 // The roulette contract. Kick and achievement decisions are made by an
 // async judge model (judge.js), not by the voice LLM — the character just
-// plays itself, and the server injects spoken reactions when a verdict
-// lands (see server.js KICK_GOODBYE_PROMPT / achievementPrompt).
+// plays itself. A kick verdict gets a spoken goodbye (see server.js
+// KICK_GOODBYE_PROMPT); an achievement is announced by the UI only, so the
+// character never learns it happened.
 function rouletteRules() {
   return (
     "\n\nYou're one stranger on a voice roulette line: people get connected " +
