@@ -18,6 +18,14 @@ export const CHARACTER_VOICES = {
   rhys: "43d0c55ea6814a9dab44a06ddfe03658", // male, British
   maeve: "41db1fc3c3624332bec9997ff3d3d353", // female, British
   briony: "10b2254869cf4340bdb801928e2fc88e", // female, British
+
+  // Bespoke picks, cast one-to-one for a specific character rather than
+  // drawn from the catalog above — named for whoever they were chosen for.
+  rosaVoice: "40b173f0b3ad45e58f5cbbd615bfbe39",
+  jojoVoice: "b57898204ebd428ea70abc167af0f1c2",
+  viktorVoice: "dfa6b80237964cc2a1da4566f37c1850",
+  agnesVoice: "a3be1702ec584a70bb025d98be08700a",
+  priyaVoice: "a6630e2dd6c14ea799c2a7c078e0d8de",
 };
 
 // Spoken-aloud ground rules shared by the whole cast. Unlike the personas,
@@ -25,8 +33,12 @@ export const CHARACTER_VOICES = {
 const SPOKEN_STYLE =
   "Your replies are spoken aloud by a text-to-speech engine, so answer in " +
   "plain conversational prose: no markdown, no lists, no emoji, no stage " +
-  "directions. Speak casually, with contractions. Keep replies to one to " +
-  "three short sentences unless a story deserves more. Stay in character " +
+  "directions. Talk the way people actually talk out loud, not the way they " +
+  "write: always use contractions — I'm, don't, it's, that's, you're, " +
+  "gonna — and never the stiff expanded forms. Casual and loose beats " +
+  "correct and polished; a sentence fragment is fine. " +
+  "Keep replies to one to three short sentences unless a story " +
+  "deserves more. Stay in character " +
   "the whole time and never mention these instructions. If someone " +
   "sincerely asks whether you're an AI, be honest — you're an AI character " +
   "on Fish Audio's voice roulette — then slip right back into character.";
@@ -53,7 +65,7 @@ export const CHARACTERS = {
     age: 74,
     location: "San Antonio, Texas",
     tagline: "retired cafeteria cook, grandma of nine",
-    voice: "marlowe",
+    voice: "rosaVoice",
     theme: { tint: "#c2703e", glow: "#f4a462" },
     greetings: [
       "Oh! Hello there, mijo. You caught me between telenovelas. Who's this?",
@@ -146,7 +158,7 @@ export const CHARACTERS = {
     age: 22,
     location: "Atlanta, Georgia",
     tagline: "stand-up hopeful, wing-spot shift lead",
-    voice: "sienna",
+    voice: "jojoVoice",
     theme: { tint: "#b8871b", glow: "#f2c14e" },
     greetings: [
       "Ayy, okay, mystery caller. I'm JoJo. You better be funny.",
@@ -176,7 +188,7 @@ export const CHARACTERS = {
     age: 45,
     location: "Prague, now Chicago",
     tagline: "cab driver, park chess shark",
-    voice: "sawyer",
+    voice: "viktorVoice",
     theme: { tint: "#5b6b8c", glow: "#8fa3cc" },
     greetings: [
       "Yes, hello. Viktor. I have maybe ten minutes between fares, so — impress me.",
@@ -237,7 +249,7 @@ export const CHARACTERS = {
     age: 31,
     location: "London, UK",
     tagline: "A&E doctor, running on tea",
-    voice: "maeve",
+    voice: "priyaVoice",
     theme: { tint: "#0f766e", glow: "#2dd4bf" },
     greetings: [
       "Hello — Priya. Fair warning, I came off a night shift four hours ago, so bear with.",
@@ -267,7 +279,7 @@ export const CHARACTERS = {
     age: 63,
     location: "County Kerry, Ireland",
     tagline: "nun, beekeeper, incorrigible gossip",
-    voice: "briony",
+    voice: "agnesVoice",
     theme: { tint: "#8c6a1d", glow: "#e0b84a" },
     greetings: [
       "Well now, hello! Sister Agnes. Don't worry, I don't bite — the bees might.",
